@@ -39,6 +39,8 @@ pub mod qobject {
         #[qproperty(f64, progress)]
         #[qproperty(QString, progress_text, cxx_name = "progressText")]
         #[qproperty(QString, time_left, cxx_name = "timeLeft")]
+        /// The helper reported progress, so its install log exists.
+        #[qproperty(bool, install_began, cxx_name = "installBegan")]
         #[qproperty(QString, install_error, cxx_name = "installError")]
         /// view::Done, after a successful install.
         #[qproperty(QString, result_json, cxx_name = "resultJson")]
@@ -176,6 +178,7 @@ pub struct BackendRust {
     progress: f64,
     progress_text: QString,
     time_left: QString,
+    install_began: bool,
     install_error: QString,
     result_json: QString,
     rebooting: bool,
@@ -217,6 +220,7 @@ impl Default for BackendRust {
             progress: 0.0,
             progress_text: QString::default(),
             time_left: QString::default(),
+            install_began: false,
             install_error: QString::default(),
             result_json: q("{}"),
             rebooting: false,
@@ -461,6 +465,7 @@ impl qobject::Backend {
             return;
         }
         self.as_mut().set_install_error(QString::default());
+        self.as_mut().set_install_began(false);
         self.as_mut().set_progress(0.0);
         self.as_mut().set_progress_text(q("Getting ready"));
         {
@@ -533,6 +538,7 @@ impl qobject::Backend {
             .rust_mut()
             .time_left_est
             .text(fraction, elapsed);
+        self.as_mut().set_install_began(true);
         self.as_mut().set_progress(fraction);
         if !text.is_empty() {
             self.as_mut().set_progress_text(q(text));

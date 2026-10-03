@@ -164,8 +164,14 @@ impl BootcProgress {
 /// copy starts (about 4 minutes in the VM; real disks vary).
 const TYPICAL_SECS: f64 = 300.0;
 
-/// "About 4 minutes left", from the Progress fraction and the time since the
-/// install started. The number only goes down, so it doesn't jump around
+/// The fraction from which elapsed time predicts the rest. Before it the
+/// prediction runs low: the stages before the copy take seconds but fill 7 %,
+/// and the copy's eased progress starts fast.
+const EXTRAPOLATE_FROM: f64 = 0.4;
+
+/// "About 4 minutes left": a countdown from the typical install time, then,
+/// once the copy is well along, from the Progress fraction and the time since
+/// the install started. The number only goes down, so it doesn't jump around
 /// when the copy stage slows.
 #[derive(Debug, Clone, Default)]
 pub struct TimeLeft {
@@ -177,7 +183,7 @@ impl TimeLeft {
         if fraction >= Stage::Finish.range().0 {
             return "Almost done".into();
         }
-        let secs = if fraction < Stage::Copy.range().0 + 0.01 {
+        let secs = if fraction < EXTRAPOLATE_FROM {
             (TYPICAL_SECS - elapsed.as_secs_f64()).max(60.0)
         } else {
             elapsed.as_secs_f64() * (1.0 - fraction) / fraction
@@ -306,11 +312,15 @@ mod tests {
         let mut t = TimeLeft::default();
         let s = Duration::from_secs;
         assert_eq!(t.text(0.0, s(0)), "About 5 minutes left");
-        assert_eq!(t.text(0.03, s(10)), "About 5 minutes left");
-        // a quarter done after 60 s: 180 s more
-        assert_eq!(t.text(0.25, s(60)), "About 3 minutes left");
+        assert_eq!(t.text(0.03, s(2)), "About 5 minutes left");
+        // the copy's fast start (in a VM, 12 % after 6 s) would extrapolate
+        // to 45 s; the countdown goes on
+        assert_eq!(t.text(0.12, s(6)), "About 5 minutes left");
+        assert_eq!(t.text(0.30, s(40)), "About 5 minutes left");
+        // 40 % done after 60 s: 90 s more
+        assert_eq!(t.text(0.40, s(60)), "About 2 minutes left");
         // slower now: the estimate would rise, the text doesn't
-        assert_eq!(t.text(0.30, s(200)), "About 3 minutes left");
+        assert_eq!(t.text(0.45, s(120)), "About 2 minutes left");
         assert_eq!(t.text(0.90, s(230)), "About a minute left");
         assert_eq!(t.text(0.98, s(240)), "Almost done");
     }

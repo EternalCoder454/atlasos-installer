@@ -87,8 +87,10 @@ InstallerPage {
         }
         QQC2.Label {
             Layout.fillWidth: true
-            // The helper's message usually names the log already.
-            visible: page.backend.installError.indexOf("/run/atlas-installer/") < 0
+            // No log when the helper never started (polkit said no); the
+            // helper's message usually names the log already.
+            visible: page.backend.installBegan
+                     && page.backend.installError.indexOf("/run/atlas-installer/") < 0
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             opacity: 0.6

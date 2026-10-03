@@ -74,7 +74,8 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   use `vm.py ssh`.
 - With `--media-first`, a reboot after the install starts the ISO again.
   To boot the installed disk, run `virsh destroy`, then
-  `virsh change-media atlasinst-<vm> sda --eject --config`, then start it.
+  `virsh change-media atlasinst-<vm> sda --eject --config` (`sdb` with
+  `--sata`), then start it.
 
 ## The UI
 
@@ -94,8 +95,9 @@ access to the VM disks. Use `--security-opt label=disable` instead.
     `[Autologin]`, `User=live`, `Session=plasma`, `Relogin=true`.
   - Add a test polkit rule in `/etc/polkit-1/rules.d/` that allows `live`
     the `net.eterneon.atlas.installer.*` and
-    `org.freedesktop.NetworkManager.*` actions. The live ISO needs the
-    same rule for real (Phase 3).
+    `org.freedesktop.NetworkManager.*` actions. Make it mode 644:
+    `vm.py exec` creates files 0600, and polkitd ignores what it can't read.
+    The live ISO needs the same rule for real (Phase 3).
   - Start the app with
     `systemd-run --machine=live@ --user --unit=atlasinst-ui /usr/bin/atlas-installer`.
   - Click with `tests/vm/click.sh <vm> X Y`, type with `virsh send-key`,
