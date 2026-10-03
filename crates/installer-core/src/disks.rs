@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::lsblk::{Device, Lsblk};
 use crate::plan::{EspInfo, Mode, Plan, Unavailable, plan_erase, plan_free_space};
@@ -25,7 +25,7 @@ pub struct Probe {
     pub esps: HashMap<String, EspInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Choice {
     pub possible: bool,
     /// Why not, for the greyed-out choice.
@@ -33,7 +33,7 @@ pub struct Choice {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FreeSpaceChoice {
     pub possible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,7 +46,7 @@ pub struct FreeSpaceChoice {
 }
 
 /// A disk as the UI shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Disk {
     /// What `Install` takes: the kernel name, e.g. `nvme0n1`.
     pub id: String,
@@ -69,14 +69,14 @@ pub struct Disk {
     pub free_space: FreeSpaceChoice,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hidden {
     pub path: String,
     pub reason: String,
 }
 
 /// `ListDisks`' answer.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskList {
     pub disks: Vec<Disk>,
     /// Devices never offered, and why (for logs and tests; the UI ignores it).

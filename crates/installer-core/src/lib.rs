@@ -6,6 +6,8 @@
 pub mod disks;
 pub mod efi;
 pub mod grub;
+pub mod keyboard;
+pub mod locales;
 pub mod lsblk;
 pub mod plan;
 pub mod progress;

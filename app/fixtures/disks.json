@@ -1,0 +1,67 @@
+{
+  "disks": [
+    {
+      "id": "nvme0n1",
+      "fingerprint": "3f9c2a71d04be855",
+      "path": "/dev/nvme0n1",
+      "name": "Samsung SSD 990 PRO 2TB",
+      "size": 2000398934016,
+      "usb": false,
+      "removable": false,
+      "contents": ["Windows"],
+      "description": "Windows",
+      "bitlocker": false,
+      "too_small": false,
+      "erase": {"possible": true},
+      "free_space": {"possible": true, "bytes": 429496729600, "shared_esp": "/dev/nvme0n1p1"}
+    },
+    {
+      "id": "sda",
+      "fingerprint": "a01d7be4c3f29e10",
+      "path": "/dev/sda",
+      "name": "Crucial MX500",
+      "size": 500107862016,
+      "usb": false,
+      "removable": false,
+      "contents": [],
+      "description": "Empty",
+      "bitlocker": false,
+      "too_small": false,
+      "erase": {"possible": true},
+      "free_space": {"possible": false, "reason": "This disk has no partitions yet. Erase it to install AtlasOS.", "bytes": 0}
+    },
+    {
+      "id": "sdb",
+      "fingerprint": "77e0b5c19a3d4f62",
+      "path": "/dev/sdb",
+      "name": "WD Blue",
+      "size": 1000204886016,
+      "usb": false,
+      "removable": false,
+      "contents": ["Windows", "Linux"],
+      "description": "Windows and Linux",
+      "bitlocker": true,
+      "too_small": false,
+      "erase": {"possible": true},
+      "free_space": {"possible": false, "reason": "Not enough free space (12 GB, AtlasOS needs 43 GB). Shrink Windows in Disk Management to make room, then restart the installer.", "bytes": 12884901888}
+    },
+    {
+      "id": "sdc",
+      "fingerprint": "c4b81e0f6a2d9375",
+      "path": "/dev/sdc",
+      "name": "SanDisk Ultra",
+      "size": 32015679488,
+      "usb": true,
+      "removable": true,
+      "contents": ["Files"],
+      "description": "Files",
+      "bitlocker": false,
+      "too_small": true,
+      "erase": {"possible": false, "reason": "Too small: AtlasOS needs 40 GB."},
+      "free_space": {"possible": false, "reason": "Too small: AtlasOS needs 40 GB.", "bytes": 1048576}
+    }
+  ],
+  "hidden": [
+    {"path": "/dev/sdd", "reason": "the installer's boot media"}
+  ]
+}

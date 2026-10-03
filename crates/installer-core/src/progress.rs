@@ -160,6 +160,38 @@ impl BootcProgress {
     }
 }
 
+/// How long a whole install usually takes, for the estimate before the
+/// copy starts (about 4 minutes in the VM; real disks vary).
+const TYPICAL_SECS: f64 = 300.0;
+
+/// "About 4 minutes left", from the Progress fraction and the time since the
+/// install started. The number only goes down, so it doesn't jump around
+/// when the copy stage slows.
+#[derive(Debug, Clone, Default)]
+pub struct TimeLeft {
+    shown_minutes: Option<u64>,
+}
+
+impl TimeLeft {
+    pub fn text(&mut self, fraction: f64, elapsed: Duration) -> String {
+        if fraction >= Stage::Finish.range().0 {
+            return "Almost done".into();
+        }
+        let secs = if fraction < Stage::Copy.range().0 + 0.01 {
+            (TYPICAL_SECS - elapsed.as_secs_f64()).max(60.0)
+        } else {
+            elapsed.as_secs_f64() * (1.0 - fraction) / fraction
+        };
+        let minutes = (secs / 60.0).ceil() as u64;
+        let minutes = self.shown_minutes.map_or(minutes, |m| m.min(minutes));
+        self.shown_minutes = Some(minutes);
+        match minutes {
+            0 | 1 => "About a minute left".into(),
+            n => format!("About {n} minutes left"),
+        }
+    }
+}
+
 /// "layers already present: 0; layers needed: 128 (3.2 GB)" → 3.2
 fn layers_gb(l: &str) -> Option<f64> {
     let inner = l.rsplit_once('(')?.1.split_once(')')?.0;
@@ -267,5 +299,19 @@ mod tests {
             Some(0.512)
         );
         assert_eq!(layers_gb("layers needed: 2"), None);
+    }
+
+    #[test]
+    fn time_left_counts_down_only() {
+        let mut t = TimeLeft::default();
+        let s = Duration::from_secs;
+        assert_eq!(t.text(0.0, s(0)), "About 5 minutes left");
+        assert_eq!(t.text(0.03, s(10)), "About 5 minutes left");
+        // a quarter done after 60 s: 180 s more
+        assert_eq!(t.text(0.25, s(60)), "About 3 minutes left");
+        // slower now: the estimate would rise, the text doesn't
+        assert_eq!(t.text(0.30, s(200)), "About 3 minutes left");
+        assert_eq!(t.text(0.90, s(230)), "About a minute left");
+        assert_eq!(t.text(0.98, s(240)), "Almost done");
     }
 }
