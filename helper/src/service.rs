@@ -28,6 +28,33 @@ pub mod action {
     pub const REBOOT: &str = "net.eterneon.atlas.installer.reboot";
 }
 
+/// What Status reports. `result` is the Install JSON once it is done; it
+/// carries the MOK password, so it is shown only to a caller that may
+/// install (see `Service::status`) and never logged.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct Status {
+    /// `idle`, `installing`, `done` or `failed`.
+    pub state: &'static str,
+    pub step: String,
+    pub fraction: f64,
+    pub text: String,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+impl Status {
+    fn idle() -> Status {
+        Status {
+            state: "idle",
+            step: String::new(),
+            fraction: 0.0,
+            text: String::new(),
+            result: None,
+            error: None,
+        }
+    }
+}
+
 /// Errors returned over D-Bus as `net.eterneon.atlas.Error.*` (the same
 /// names as Atlas Updater's helper).
 #[derive(Debug, zbus::DBusError)]
@@ -104,6 +131,9 @@ struct State {
     active: usize,
     last: Option<Instant>,
     closing: bool,
+    /// An install ran or the computer is restarting: the helper keeps its
+    /// state (the result of the install, the busy flag) until it is stopped.
+    pinned: bool,
 }
 
 /// Calls in flight and the time of the last one. One lock, so a call cannot
@@ -128,10 +158,15 @@ impl Activity {
     /// the helper as closing and return true.
     pub fn close_if_idle(&self, timeout: Duration, started: Instant) -> bool {
         let mut st = lock(&self.0);
-        if st.active == 0 && st.last.unwrap_or(started).elapsed() >= timeout {
+        if !st.pinned && st.active == 0 && st.last.unwrap_or(started).elapsed() >= timeout {
             st.closing = true;
         }
         st.closing
+    }
+
+    /// Never exit for being idle again. SIGTERM still stops the helper.
+    pub fn pin(&self) {
+        lock(&self.0).pinned = true;
     }
 
     pub fn begin_close(&self) {
@@ -178,6 +213,9 @@ pub struct Service {
     /// other, and an install waits for a listing in flight (ListDisks
     /// mounts EFI partitions to look at them).
     disks: Arc<tokio::sync::Mutex<()>>,
+    /// The state of the install, kept for the helper's lifetime so a UI
+    /// that restarted or lost its connection can pick it up.
+    status: Arc<Mutex<Status>>,
 }
 
 const SHUTTING_DOWN: &str = "the helper is shutting down, try again";
@@ -191,7 +229,33 @@ impl Service {
             activity: Arc::new(Activity::default()),
             busy: Arc::new(AtomicBool::new(false)),
             disks: Arc::new(tokio::sync::Mutex::new(())),
+            status: Arc::new(Mutex::new(Status::idle())),
         }
+    }
+
+    /// Another handle on the same state, for a task that outlives a call.
+    fn handle(&self) -> Service {
+        Service {
+            runner: self.runner.clone(),
+            env: self.env.clone(),
+            activity: self.activity.clone(),
+            busy: self.busy.clone(),
+            disks: self.disks.clone(),
+            status: self.status.clone(),
+        }
+    }
+
+    /// The work behind Status, without polkit (tests). The MOK password is
+    /// left out of the result unless `with_secret`.
+    pub fn do_status(&self, with_secret: bool) -> Result<String, HelperError> {
+        let mut st = lock(&self.status).clone();
+        if !with_secret
+            && let Some(serde_json::Value::Object(o)) = st.result.as_mut()
+            && o.get("mok_password").is_some_and(|v| !v.is_null())
+        {
+            o.insert("mok_password".into(), serde_json::Value::Null);
+        }
+        serde_json::to_string(&st).map_err(|e| HelperError::Failed(e.to_string()))
     }
 
     fn begin(&self) -> Result<ActivityGuard, HelperError> {
@@ -249,9 +313,23 @@ impl Service {
     {
         let guard = self.begin()?;
         let busy = self.take_busy()?;
+        // from here the helper must stay up: it holds the install's result
+        self.activity.pin();
+        *lock(&self.status) = Status {
+            state: "installing",
+            text: "Preparing".into(),
+            ..Status::idle()
+        };
         let disks = self.disks.clone().lock_owned().await;
         let inhibit = inhibit.await;
         let (runner, env) = (self.runner.clone(), self.env.clone());
+        let status = self.status.clone();
+        let record = move |step: &str, fraction: f64, text: &str| {
+            let mut st = lock(&status);
+            st.step = step.into();
+            st.fraction = fraction;
+            st.text = text.into();
+        };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut work = tokio::task::spawn_blocking(move || {
             let _keep = (guard, busy, disks, inhibit);
@@ -261,17 +339,45 @@ impl Service {
         });
         let result = loop {
             tokio::select! {
-                Some((step, fraction, text)) = rx.recv() => progress(step, fraction, text),
+                Some((step, fraction, text)) = rx.recv() => {
+                    record(step, fraction, text);
+                    progress(step, fraction, text)
+                }
                 r = &mut work => break r,
             }
         };
         while let Ok((step, fraction, text)) = rx.try_recv() {
+            record(step, fraction, text);
             progress(step, fraction, text);
         }
         let outcome = result
-            .map_err(|e| HelperError::Failed(format!("worker failed: {e}")))?
-            .map_err(HelperError::Failed)?;
-        serde_json::to_string(&outcome).map_err(|e| HelperError::Failed(e.to_string()))
+            .map_err(|e| HelperError::Failed(format!("worker failed: {e}")))
+            .and_then(|r| r.map_err(HelperError::Failed))
+            .and_then(|o| {
+                let value =
+                    serde_json::to_value(&o).map_err(|e| HelperError::Failed(e.to_string()))?;
+                let json =
+                    serde_json::to_string(&o).map_err(|e| HelperError::Failed(e.to_string()))?;
+                Ok((json, value))
+            });
+        let mut st = lock(&self.status);
+        match outcome {
+            Ok((json, value)) => {
+                st.state = "done";
+                st.fraction = 1.0;
+                st.result = Some(value);
+                st.error = None;
+                Ok(json)
+            }
+            Err(e) => {
+                st.state = "failed";
+                st.error = Some(match &e {
+                    HelperError::Failed(m) => m.clone(),
+                    other => format!("{other:?}"),
+                });
+                Err(e)
+            }
+        }
     }
 
     async fn authorize(
@@ -279,6 +385,17 @@ impl Service {
         header: &Header<'_>,
         conn: &zbus::Connection,
         action: &str,
+    ) -> Result<(), HelperError> {
+        self.authorize_with(header, conn, action, POLKIT_ALLOW_USER_INTERACTION)
+            .await
+    }
+
+    async fn authorize_with(
+        &self,
+        header: &Header<'_>,
+        conn: &zbus::Connection,
+        action: &str,
+        flags: u32,
     ) -> Result<(), HelperError> {
         let denied = |m: String| HelperError::NotAuthorized(m);
         let sender = header
@@ -297,7 +414,7 @@ impl Service {
                 &subject,
                 action,
                 &HashMap::new(),
-                POLKIT_ALLOW_USER_INTERACTION,
+                flags,
                 "",
             )
             .await
@@ -351,23 +468,51 @@ impl Service {
         }
         let req = Request::new(&disk_id, &fingerprint, &mode, &locale, &keymap, &wifi_uuid)
             .map_err(HelperError::InvalidArgument)?;
+        // A task of its own: the install and its Progress signals go on
+        // even if this call is dropped (the caller crashed or disconnected).
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let work = self.do_install(req, block_shutdown(conn), move |s, f, t| {
-            let _ = tx.send((s, f, t));
-        });
-        tokio::pin!(work);
-        let result = loop {
-            tokio::select! {
-                Some((step, fraction, text)) = rx.recv() => {
-                    let _ = Service::progress(&emitter, step, fraction, text).await;
+        let emitter = emitter.to_owned();
+        let conn = conn.clone();
+        let service = self.handle();
+        let task = tokio::spawn(async move {
+            let work = service.do_install(req, block_shutdown(&conn), move |s, f, t| {
+                let _ = tx.send((s, f, t));
+            });
+            tokio::pin!(work);
+            let result = loop {
+                tokio::select! {
+                    Some((step, fraction, text)) = rx.recv() => {
+                        let _ = Service::progress(&emitter, step, fraction, text).await;
+                    }
+                    r = &mut work => break r,
                 }
-                r = &mut work => break r,
+            };
+            while let Ok((step, fraction, text)) = rx.try_recv() {
+                let _ = Service::progress(&emitter, step, fraction, text).await;
             }
-        };
-        while let Ok((step, fraction, text)) = rx.try_recv() {
-            let _ = Service::progress(&emitter, step, fraction, text).await;
-        }
-        result
+            result
+        });
+        task.await
+            .map_err(|e| HelperError::Failed(format!("worker failed: {e}")))?
+    }
+
+    /// The install's state, JSON: `{"state": "idle"|"installing"|"done"|
+    /// "failed", "step", "fraction", "text", "result", "error"}`. `result`
+    /// is Install's answer once done; its `mok_password` is null unless the
+    /// caller may install without being asked.
+    async fn status(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &zbus::Connection,
+    ) -> Result<String, HelperError> {
+        let _guard = self.begin()?;
+        self.authorize(&header, conn, action::LIST_DISKS).await?;
+        // no prompt: a caller that would have to authenticate gets no secret
+        let secret = self
+            .authorize_with(&header, conn, action::INSTALL, 0)
+            .await
+            .is_ok();
+        self.do_status(secret)
     }
 
     /// Restart the computer (refused while installing).
@@ -388,6 +533,8 @@ impl Service {
         .map_err(HelperError::Failed)?;
         // the computer is going down: nothing may touch the disks now
         std::mem::forget(busy);
+        // and the helper must not exit and forget it during a slow shutdown
+        self.activity.pin();
         Ok(())
     }
 
@@ -464,6 +611,58 @@ mod tests {
         drop(g);
         assert!(a.close_if_idle(Duration::ZERO, start));
         assert!(a.enter().is_none(), "refused once closing");
+    }
+
+    #[test]
+    fn a_pinned_helper_never_idles_out() {
+        let a = Arc::new(Activity::default());
+        a.pin();
+        assert!(!a.close_if_idle(Duration::ZERO, Instant::now()));
+        assert!(a.enter().is_some(), "still takes calls");
+        a.begin_close();
+        assert!(a.close_if_idle(Duration::ZERO, Instant::now()), "SIGTERM still works");
+    }
+
+    fn status_of(s: &Service, secret: bool) -> serde_json::Value {
+        serde_json::from_str(&s.do_status(secret).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn status_before_during_and_after_an_install() {
+        let s = Service::new(Arc::new(Nothing), Env::system());
+        assert_eq!(status_of(&s, true)["state"], "idle");
+        // a failing install: recorded as failed, with the reason, and pinned
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let r = s.do_install(req, async { None }, |_, _, _| {}).await;
+        assert!(r.is_err());
+        let st = status_of(&s, true);
+        assert_eq!(st["state"], "failed");
+        assert!(!st["error"].as_str().unwrap().is_empty());
+        assert!(st["result"].is_null());
+        assert!(!s.activity.close_if_idle(Duration::ZERO, Instant::now()));
+        // a refused install (busy) leaves the recorded state alone
+        s.busy.store(true, Ordering::Release);
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        assert!(s.do_install(req, async { None }, |_, _, _| {}).await.is_err());
+        assert_eq!(status_of(&s, true)["state"], "failed");
+    }
+
+    #[test]
+    fn status_hides_the_mok_password_from_callers_who_may_not_install() {
+        let s = Service::new(Arc::new(Nothing), Env::system());
+        *lock(&s.status) = Status {
+            state: "done",
+            step: "finish".into(),
+            fraction: 1.0,
+            text: "Done".into(),
+            result: Some(serde_json::json!({"mok_password": "12345678", "warnings": []})),
+            error: None,
+        };
+        assert_eq!(status_of(&s, true)["result"]["mok_password"], "12345678");
+        let hidden = status_of(&s, false);
+        assert!(hidden["result"]["mok_password"].is_null());
+        assert!(!s.do_status(false).unwrap().contains("12345678"));
+        assert_eq!(hidden["state"], "done");
     }
 
     struct Nothing;

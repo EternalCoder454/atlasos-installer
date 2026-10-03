@@ -751,3 +751,40 @@ fn an_esp_that_stays_mounted_stops_the_probe() {
             .any(|c| c.args.first().map(String::as_str) == Some("--lazy"))
     );
 }
+
+#[tokio::test]
+async fn status_follows_a_whole_install_and_keeps_the_result() {
+    use crate::service::Service;
+    let w = World::new();
+    w.put(NVIDIA_KEY, b"der");
+    w.put(SECURE_BOOT_VAR, &[6, 0, 0, 0, 1]);
+    let World { _dir, env, fake } = w;
+    let s = Service::new(std::sync::Arc::new(fake), env);
+    let status = |secret| -> serde_json::Value {
+        serde_json::from_str(&s.do_status(secret).unwrap()).unwrap()
+    };
+    assert_eq!(status(true)["state"], "idle");
+    let mut steps = Vec::new();
+    let json = s
+        .do_install(req("sda", "free-space"), async { None }, |step, f, _| {
+            steps.push((step, f))
+        })
+        .await
+        .unwrap();
+    assert!(!steps.is_empty());
+    let st = status(true);
+    assert_eq!(st["state"], "done");
+    assert_eq!(st["fraction"], 1.0);
+    assert_eq!(st["step"], steps.last().unwrap().0);
+    // the result is what Install returned, MOK password included
+    let returned: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(st["result"], returned);
+    let pw = returned["mok_password"].as_str().unwrap().to_string();
+    assert_eq!(pw.len(), 8);
+    // and it stays, unchanged, for later callers; one that may not install
+    // gets it without the password
+    assert_eq!(status(true)["result"], returned);
+    let hidden = s.do_status(false).unwrap();
+    assert!(!hidden.contains(&pw));
+    assert_eq!(status(false)["state"], "done");
+}

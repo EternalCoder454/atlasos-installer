@@ -1,7 +1,7 @@
 //! Running commands: absolute paths, a clean environment, a timeout, capped
 //! output, and each output line handed to the caller as it arrives.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -176,8 +176,8 @@ pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Process groups of the commands running now.
-static RUNNING: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+/// Process groups of the commands running now, and whether each is cleanup.
+static RUNNING: Mutex<Option<HashMap<u32, bool>>> = Mutex::new(None);
 /// Set at shutdown: commands started from now on are stopped at once,
 /// except cleanup.
 static CLOSING: AtomicBool = AtomicBool::new(false);
@@ -191,10 +191,22 @@ fn kill_group(pgid: u32, signal: rustix::process::Signal) {
     }
 }
 
-/// Ask every running command to stop (shutdown).
+/// The process groups `terminate_running` signals: everything but cleanup.
+fn to_terminate(running: &HashMap<u32, bool>) -> Vec<u32> {
+    let mut v: Vec<u32> = running
+        .iter()
+        .filter(|(_, cleanup)| !**cleanup)
+        .map(|(p, _)| *p)
+        .collect();
+    v.sort_unstable();
+    v
+}
+
+/// Ask every running command to stop (shutdown), except cleanup: an
+/// unmount that is already running is left to finish.
 pub fn terminate_running() {
     CLOSING.store(true, Ordering::Release);
-    let pgids: Vec<u32> = lock(&RUNNING).iter().flatten().copied().collect();
+    let pgids = to_terminate(lock(&RUNNING).as_ref().unwrap_or(&HashMap::new()));
     for pgid in pgids {
         kill_group(pgid, rustix::process::Signal::TERM);
     }
@@ -247,7 +259,9 @@ impl Runner for SystemRunner {
             .spawn()
             .map_err(|e| format!("cannot run {}: {e}", cmd.program))?;
         let pgid = child.id();
-        lock(&RUNNING).get_or_insert_with(HashSet::new).insert(pgid);
+        lock(&RUNNING)
+            .get_or_insert_with(HashMap::new)
+            .insert(pgid, cmd.cleanup);
         if CLOSING.load(Ordering::Acquire) && !cmd.cleanup {
             kill_group(pgid, rustix::process::Signal::TERM);
         }
@@ -428,6 +442,12 @@ mod tests {
             .run(&Sh::cmd("wc -l").stdin(input), &mut |_| {})
             .unwrap();
         assert_eq!(out.stdout.trim(), "200000");
+    }
+
+    #[test]
+    fn shutdown_leaves_a_running_cleanup_alone() {
+        let running = HashMap::from([(10, false), (11, true), (12, false)]);
+        assert_eq!(to_terminate(&running), [10, 12]);
     }
 
     #[test]
