@@ -410,13 +410,7 @@ impl Service {
             HashMap::from([("name", Value::from(sender.as_str()))]),
         );
         let (authorized, _challenge, _details) = authority
-            .check_authorization(
-                &subject,
-                action,
-                &HashMap::new(),
-                flags,
-                "",
-            )
+            .check_authorization(&subject, action, &HashMap::new(), flags, "")
             .await
             .map_err(|e| denied(format!("polkit check failed: {e}")))?;
         if authorized {
@@ -620,7 +614,10 @@ mod tests {
         assert!(!a.close_if_idle(Duration::ZERO, Instant::now()));
         assert!(a.enter().is_some(), "still takes calls");
         a.begin_close();
-        assert!(a.close_if_idle(Duration::ZERO, Instant::now()), "SIGTERM still works");
+        assert!(
+            a.close_if_idle(Duration::ZERO, Instant::now()),
+            "SIGTERM still works"
+        );
     }
 
     fn status_of(s: &Service, secret: bool) -> serde_json::Value {
@@ -643,7 +640,11 @@ mod tests {
         // a refused install (busy) leaves the recorded state alone
         s.busy.store(true, Ordering::Release);
         let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
-        assert!(s.do_install(req, async { None }, |_, _, _| {}).await.is_err());
+        assert!(
+            s.do_install(req, async { None }, |_, _, _| {})
+                .await
+                .is_err()
+        );
         assert_eq!(status_of(&s, true)["state"], "failed");
     }
 

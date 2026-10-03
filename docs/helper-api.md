@@ -2,7 +2,11 @@
 
 The installer's root helper. It runs only in the live session and is started
 by D-Bus activation through systemd (`atlas-installer-helper.service`). It
-exits after 60 seconds without calls. It is modelled on Atlas Updater's
+exits after 60 seconds without calls, unless an install has started or the
+computer is restarting: then it stays until systemd stops it, so a result
+nobody has read yet, or the busy flag, is not lost. A stop (SIGTERM) waits
+for a running install, and for an `umount` of the cleanup that is already
+running, to finish. It is modelled on Atlas Updater's
 `atlas-system-helper`.
 
 | | |
@@ -103,7 +107,41 @@ While Install runs:
 - the helper holds a logind block inhibitor for shutdown, sleep and idle
 - every other disk call returns `Busy`
 
-The install keeps going if the caller disconnects.
+The install keeps going if the caller disconnects or crashes: it runs in a
+task of its own, and its state is kept (see `Status`). A UI that lost the
+call asks `Status` instead of reporting a failure.
+
+### `Status() → s`
+
+Polkit action: `net.eterneon.atlas.installer.list-disks` (active local
+session, no authentication). Works at any time, also while installing.
+
+Returns the state of the install this helper has run, kept until the
+helper stops:
+
+```json
+{"state": "idle" | "installing" | "done" | "failed",
+ "step": "copy", "fraction": 0.42, "text": "Copying AtlasOS",
+ "result": null | { Install's JSON }, "error": null | "message"}
+```
+
+| State | Meaning |
+|---|---|
+| `idle` | No install has started in this helper. |
+| `installing` | Running. `step`, `fraction` and `text` are the latest Progress. |
+| `done` | Finished. `result` is what Install returned. |
+| `failed` | `error` is the text Install's `Failed` error carried. |
+
+`result.mok_password` is filled only for a caller that polkit would let
+install (`net.eterneon.atlas.installer.install`) without asking: the check
+runs with no interaction. For anyone else it is `null`. The password is
+never logged.
+
+A UI that starts, or whose `Install` call dropped, calls Status: `installing`
+goes to the Progress page and Status is asked every two seconds (the
+Progress signal still works); `done` goes to the Restart page; `failed`
+shows the error. After a drop, `idle` means the install did not survive (the
+helper restarted) and counts as a failure.
 
 ### `Reboot()`
 
@@ -111,7 +149,8 @@ Polkit action: `net.eterneon.atlas.installer.reboot`. An active local
 session is allowed without authentication.
 
 Reboot is refused while an install is running. Once the reboot has started,
-the helper refuses all disk calls.
+the helper refuses all disk calls, and no longer exits when idle, so that a
+slow shutdown does not lose the flag.
 
 ## Signal
 

@@ -11,7 +11,9 @@ ExecStart=/usr/libexec/atlas-installer-helper
 # formats and mounts filesystems under /run/atlas-target, runs bootc against
 # the live system's container storage and writes firmware boot entries; the
 # mounts must be visible to bootc and to the user's session. It exits by
-# itself after 60 seconds without calls.
+# itself after 60 seconds without calls, except once an install has started
+# or the computer is restarting (it then holds the install's result and its
+# busy flag until stopped). A cleanup umount that is running is not stopped.
 #
 # Stopping: the helper handles SIGTERM itself. It refuses new calls, releases
 # its bus name and waits for a running install (up to 40 s), then stops its
