@@ -58,7 +58,7 @@ QQC2.ApplicationWindow {
     readonly property var steps: root.allSteps.filter(s => s.key !== "wifi" || !root.skipWifi)
     property string current: "welcome"
     // The furthest step reached, as an index into allSteps (which never
-    // changes), so the sidebar can go back to done ones.
+    // changes), so the step panel can go back to done ones.
     property int reached: 0
     readonly property int currentIndex: root.steps.findIndex(s => s.key === root.current)
 
@@ -212,77 +212,16 @@ QQC2.ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        Rectangle {
-            id: sidebar
+        BrandPanel {
             Layout.fillHeight: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 13
-            color: Qt.tint(Kirigami.Theme.backgroundColor, Qt.alpha(Kirigami.Theme.highlightColor, 0.07))
-
-            Rectangle {
-                anchors.right: parent.right
-                height: parent.height
-                width: 1
-                color: Qt.alpha(Kirigami.Theme.textColor, 0.12)
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: Kirigami.Units.largeSpacing
-                anchors.rightMargin: Kirigami.Units.largeSpacing + 1
-                anchors.topMargin: Kirigami.Units.gridUnit * 1.5
-                spacing: Kirigami.Units.smallSpacing
-
-                RowLayout {
-                    Layout.leftMargin: Kirigami.Units.largeSpacing
-                    Layout.bottomMargin: Kirigami.Units.gridUnit
-                    spacing: Kirigami.Units.largeSpacing
-                    Image {
-                        source: "qrc:/qt/qml/net/eterneon/atlas/installer/data/atlasos-logo.svg"
-                        sourceSize.width: Kirigami.Units.iconSizes.medium
-                        sourceSize.height: Kirigami.Units.iconSizes.medium
-                        Accessible.ignored: true
-                    }
-                    QQC2.Label {
-                        text: "AtlasOS"
-                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
-                        font.weight: Font.DemiBold
-                        textFormat: Text.PlainText
-                    }
-                }
-
-                Repeater {
-                    model: root.steps
-                    StepItem {
-                        id: stepItem
-                        required property var modelData
-                        required property int index
-                        Layout.fillWidth: true
-                        number: stepItem.index + 1
-                        text: stepItem.modelData.title
-                        current: root.current === stepItem.modelData.key
-                        readonly property int allIndex: root.allIndex(stepItem.modelData.key)
-                        done: stepItem.allIndex <= root.reached && !stepItem.current
-                        clickable: stepItem.done && root.canGoBack && stepItem.allIndex < root.allIndex(root.current)
-                        // Space still clicks a focused button, clickable or not.
-                        onClicked: if (stepItem.clickable) root.show(stepItem.modelData.key)
-                    }
-                }
-
-                Item {
-                    Layout.fillHeight: true
-                }
-
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.largeSpacing
-                    visible: root.backend.demo
-                    text: qsTr("Demo: nothing here is real, and nothing is installed.")
-                    wrapMode: Text.Wrap
-                    font: Kirigami.Theme.smallFont
-                    color: Kirigami.Theme.neutralTextColor
-                    textFormat: Text.PlainText
-                }
-            }
+            Layout.preferredWidth: Math.round(Math.max(Kirigami.Units.gridUnit * 13, Math.min(Kirigami.Units.gridUnit * 19, root.width * 0.3)))
+            steps: root.steps
+            current: root.current
+            // reached counts allSteps; the panel counts the shown steps.
+            reached: root.steps.reduce((n, s, i) => root.allIndex(s.key) <= root.reached ? i : n, 0)
+            canGoBack: root.canGoBack
+            demo: root.backend.demo
+            onStepClicked: key => root.show(key)
         }
 
         QQC2.StackView {

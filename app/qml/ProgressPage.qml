@@ -28,20 +28,15 @@ InstallerPage {
         spacing: Kirigami.Units.gridUnit
         visible: !page.failed
 
-        Image {
-            Layout.alignment: Qt.AlignHCenter
-            source: "qrc:/qt/qml/net/eterneon/atlas/installer/data/atlasos-logo.svg"
-            sourceSize.width: Kirigami.Units.gridUnit * 5
-            sourceSize.height: Kirigami.Units.gridUnit * 5
-            Accessible.ignored: true
-        }
-        Kirigami.Heading {
+        QQC2.Label {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
-            level: 1
+            font.pointSize: Kirigami.Theme.defaultFont.pointSize * 2.1
             font.weight: Font.DemiBold
+            font.letterSpacing: -0.2
             text: qsTr("Installing AtlasOS")
             textFormat: Text.PlainText
+            Accessible.role: Accessible.Heading
         }
         AtlasProgressBar {
             Layout.fillWidth: true
@@ -82,7 +77,7 @@ InstallerPage {
         StatusHero {
             iconName: "window-close-symbolic"
             tint: Kirigami.Theme.negativeTextColor
-            headline: page.failed ? qsTr("AtlasOS Couldn't Be Installed") : ""
+            headline: page.failed ? qsTr("AtlasOS couldn't be installed") : ""
             subtitle: page.backend.installError
         }
         QQC2.Label {

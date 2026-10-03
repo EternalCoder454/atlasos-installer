@@ -17,6 +17,8 @@ InstallerPage {
     readonly property var result: JSON.parse(page.backend.resultJson)
     readonly property string mok: page.result.mokPassword || ""
 
+    title: qsTr("AtlasOS is installed")
+    subtitle: qsTr("Remove the USB stick, then restart.")
     backVisible: false
     primaryText: page.backend.rebooting ? qsTr("Restarting…") : qsTr("Restart")
     primaryEnabled: !page.backend.rebooting
@@ -34,38 +36,20 @@ InstallerPage {
             x: Math.round((scroll.width - width) / 2)
             spacing: Kirigami.Units.gridUnit
 
-            StatusHero {
-                Layout.topMargin: page.mok.length > 0 ? 0 : Kirigami.Units.gridUnit * 2
-                // Bundled: some icon themes (Dracula) draw "checkmark" at
-                // this size as a filled circle.
-                iconName: "qrc:/qt/qml/net/eterneon/atlas/installer/data/check.svg"
-                tint: Kirigami.Theme.positiveTextColor
-                headline: qsTr("AtlasOS Is Installed")
-                subtitle: qsTr("Remove the USB stick, then restart.")
-            }
-
             QQC2.Label {
                 Layout.fillWidth: true
-                visible: page.result.windowsEntry === true
-                horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
-                opacity: 0.7
-                text: qsTr("Windows is still there: choose it in the menu when the computer starts.")
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                opacity: 0.7
-                text: page.mok.length > 0
-                      ? qsTr("Once AtlasOS starts, you'll create your account.")
-                      : qsTr("After the restart, you'll create your account.")
+                text: (page.result.windowsEntry === true
+                       ? qsTr("Windows is still there: choose it in the menu when the computer starts.") + " "
+                       : "")
+                      + (page.mok.length > 0
+                         ? qsTr("Once AtlasOS starts, you'll create your account.")
+                         : qsTr("After the restart, you'll create your account."))
             }
 
             Section {
                 visible: page.mok.length > 0
-                title: qsTr("One More Step for NVIDIA Graphics")
+                title: qsTr("One more step for NVIDIA graphics")
                 footer: qsTr("This happens once. If you miss the blue screen, AtlasOS starts with basic graphics; open a terminal and run “sudo /usr/libexec/atlasos/nvidia-enroll-key” to try again.")
 
                 ColumnLayout {
@@ -126,7 +110,7 @@ InstallerPage {
 
             Section {
                 visible: (page.result.warnings || []).length > 0
-                title: qsTr("Worth Knowing")
+                title: qsTr("Worth knowing")
                 footer: qsTr("AtlasOS works despite these. The install log is at %1 until the computer restarts.").arg(page.result.log || "/run/atlas-installer/install.log")
                 Repeater {
                     model: page.result.warnings || []

@@ -86,7 +86,9 @@ access to the VM disks. Use `--security-opt label=disable` instead.
 - **Screenshots** come from `app/tools/screenshot.sh`. It runs inside the
   container on Xvfb with a private bus and a Breeze colour scheme. It
   focuses the window, because an inactive window draws washed-out colours.
-  Set `SCALE=1.5` to match the user's desktop.
+  Set `SCALE=1.5` to match the user's desktop, and `ATLAS=1` for the
+  AtlasOS colours and IBM Plex Sans (copies of the schemes are in
+  `app/tools/schemes/`).
 - **In a VM**, the UI runs in the live Plasma session:
   - Push the helper with `vm.py push`, and copy `build/app/atlas-installer`
     to `/usr/bin/`.

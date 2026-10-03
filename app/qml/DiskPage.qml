@@ -18,8 +18,8 @@ InstallerPage {
     readonly property var disk: page.app.disk
     readonly property bool modeOk: page.disk !== null && (page.app.mode === "erase" && page.disk.eraseOk || page.app.mode === "free-space" && page.disk.freeOk)
 
-    title: qsTr("Choose a Disk")
-    subtitle: qsTr("Where should AtlasOS go?")
+    title: qsTr("Where should AtlasOS go?")
+    subtitle: qsTr("Choose a disk, then how to install on it.")
     primaryEnabled: page.diskState === "ready" && page.modeOk
     onPrimary: page.app.next()
     onBack: page.app.previous()
@@ -107,7 +107,7 @@ InstallerPage {
                 Layout.topMargin: Kirigami.Units.gridUnit * 2
                 iconName: page.diskState === "error" ? "window-close-symbolic" : "drive-harddisk-symbolic"
                 tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.highlightColor
-                headline: page.diskState === "error" ? qsTr("Couldn't Read the Disks") : qsTr("No Disk Found")
+                headline: page.diskState === "error" ? qsTr("Couldn't read the disks") : qsTr("No disk found")
                 subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("AtlasOS needs a disk of at least 40 GB. Connect one, then look again.")
                 SecondaryButton {
                     text: qsTr("Look Again")
@@ -164,7 +164,7 @@ InstallerPage {
 
                 QQC2.Label {
                     Layout.leftMargin: Kirigami.Units.largeSpacing
-                    text: qsTr("How to Install")
+                    text: qsTr("How to install")
                     font.bold: true
                     opacity: 0.65
                     Accessible.role: Accessible.Heading

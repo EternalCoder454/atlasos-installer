@@ -7,25 +7,17 @@ import org.kde.kirigami as Kirigami
 import Atlas.Ui
 import net.eterneon.atlas.installer
 
-// Step 1: the AtlasOS logo, a welcome, and the installed system's language.
+// Step 1: a welcome, and the installed system's language.
 InstallerPage {
     id: page
 
     required property var app
 
     title: qsTr("Welcome to AtlasOS")
-    subtitle: qsTr("Choose the language for AtlasOS. The installer itself is in English.")
+    subtitle: qsTr("Which language should AtlasOS use? The installer itself stays in English.")
     backVisible: false
     primaryEnabled: page.app.language.length > 0
     onPrimary: page.app.next()
-
-    header: Image {
-        Layout.bottomMargin: Kirigami.Units.largeSpacing
-        source: "qrc:/qt/qml/net/eterneon/atlas/installer/data/atlasos-logo.svg"
-        sourceSize.width: Kirigami.Units.gridUnit * 4.5
-        sourceSize.height: Kirigami.Units.gridUnit * 4.5
-        Accessible.ignored: true
-    }
 
     // [{code, native, english}], sorted by the English name.
     readonly property var languages: {

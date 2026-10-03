@@ -13,8 +13,8 @@ InstallerPage {
 
     required property var app
 
-    title: qsTr("Keyboard")
-    subtitle: qsTr("Choose your keyboard layout. It works here right away, so you can try it.")
+    title: qsTr("Is this the right keyboard layout?")
+    subtitle: qsTr("If not, choose yours. It works here right away, so you can try it.")
     onPrimary: page.app.next()
     onBack: page.app.previous()
 

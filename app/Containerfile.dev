@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
         cargo rust clippy rustfmt gcc gcc-c++ cmake ninja-build corrosion \
         qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg qt6-qtwayland \
         kf6-kirigami-devel kf6-qqc2-desktop-style kf6-kcolorscheme \
-        breeze-icon-theme plasma-breeze-qt6 google-noto-sans-fonts \
+        breeze-icon-theme plasma-breeze-qt6 google-noto-sans-fonts ibm-plex-sans-fonts \
         glibc-all-langpacks xkeyboard-config dbus-daemon \
         xorg-x11-server-Xvfb xorg-x11-xauth xdotool ImageMagick \
     && dnf clean all

@@ -4,8 +4,9 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import Atlas.Ui
 
-// One installer step: a big title and a line under it, the page's content,
-// and a footer with a quiet Back on the left and the accent pill on the right.
+// One installer step: the question as a big title and a line under it, the
+// page's content, and a footer with a quiet Back on the left and the accent
+// pill on the right.
 FocusScope {
     id: page
 
@@ -19,7 +20,8 @@ FocusScope {
     property string secondaryText
     property alias header: headerSlot.data
     default property alias content: body.data
-    readonly property real contentWidth: Math.min(width - Kirigami.Units.gridUnit * 4, Kirigami.Units.gridUnit * 38)
+    // Lines stay readable: wider windows get more margin, not longer lines.
+    readonly property real contentWidth: Math.min(width - Kirigami.Units.gridUnit * 4, Kirigami.Units.gridUnit * 34)
 
     signal primary
     signal back
@@ -36,8 +38,8 @@ FocusScope {
             Layout.fillHeight: false
             Layout.preferredWidth: page.contentWidth
             Layout.alignment: Qt.AlignHCenter
-            Layout.topMargin: Kirigami.Units.gridUnit * 2
-            spacing: Kirigami.Units.smallSpacing
+            Layout.topMargin: Kirigami.Units.gridUnit * 2.5
+            spacing: Kirigami.Units.largeSpacing
 
             ColumnLayout {
                 id: headerSlot
@@ -48,8 +50,9 @@ FocusScope {
                 Layout.fillWidth: true
                 visible: page.title.length > 0
                 text: page.title
-                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.8
-                font.weight: Font.Bold
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 2.1
+                font.weight: Font.DemiBold
+                font.letterSpacing: -0.2
                 wrapMode: Text.Wrap
                 textFormat: Text.PlainText
                 Accessible.role: Accessible.Heading
@@ -58,6 +61,7 @@ FocusScope {
                 Layout.fillWidth: true
                 visible: page.subtitle.length > 0
                 text: page.subtitle
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
                 wrapMode: Text.Wrap
                 opacity: 0.7
                 textFormat: Text.PlainText
@@ -68,15 +72,9 @@ FocusScope {
             id: body
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.topMargin: Kirigami.Units.gridUnit
+            Layout.topMargin: Kirigami.Units.gridUnit * 1.5
         }
 
-        Rectangle {
-            Layout.fillWidth: true
-            visible: page.footerVisible
-            implicitHeight: 1
-            color: Qt.alpha(Kirigami.Theme.textColor, 0.1)
-        }
         RowLayout {
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.gridUnit
@@ -85,10 +83,8 @@ FocusScope {
             visible: page.footerVisible
             spacing: Kirigami.Units.largeSpacing
 
-            SecondaryButton {
+            BackButton {
                 visible: page.backVisible
-                text: qsTr("Back")
-                icon.name: LayoutMirroring.enabled ? "go-next" : "go-previous"
                 onClicked: page.back()
             }
             Item {

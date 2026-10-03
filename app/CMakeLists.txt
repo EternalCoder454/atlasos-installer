@@ -35,11 +35,13 @@ qt_add_qml_module(atlas-installer-app
     SOURCES cpp/localeinfo.h cpp/localeinfo.cpp
     QML_FILES
         qml/Main.qml qml/InstallerPage.qml qml/SearchField.qml qml/ChoiceCard.qml qml/Note.qml
-        qml/ListFrame.qml qml/ListRow.qml
+        qml/ListFrame.qml qml/ListRow.qml qml/BrandPanel.qml qml/BackButton.qml
         qml/WelcomePage.qml qml/KeyboardPage.qml qml/WifiPage.qml qml/DiskPage.qml
         qml/ReviewPage.qml qml/ProgressPage.qml qml/RestartPage.qml
     RESOURCES
-        data/atlasos-logo.svg data/check.svg
+        data/atlasos-logo.svg
+        data/art/welcome.svg data/art/keyboard.svg data/art/wifi.svg data/art/disk.svg
+        data/art/review.svg data/art/progress.svg data/art/restart.svg
 )
 
 target_link_libraries(atlas-installer-app PRIVATE

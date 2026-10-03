@@ -20,8 +20,8 @@ InstallerPage {
     readonly property bool losesData: page.erase && page.disk !== null && !page.disk.empty
     readonly property var layouts: JSON.parse(page.app.backend.layoutsJson)
 
-    title: qsTr("Review")
-    subtitle: qsTr("Check everything before AtlasOS is installed.")
+    title: qsTr("Ready to install?")
+    subtitle: qsTr("Check that everything looks right.")
     primaryText: page.losesData ? qsTr("Erase and Install") : qsTr("Install")
     primaryEnabled: page.disk !== null && page.app.mode.length > 0
     onPrimary: page.erase ? confirm.open() : page.app.startInstall()
@@ -115,7 +115,7 @@ InstallerPage {
 
     ConfirmDialog {
         id: confirm
-        title: !page.disk ? "" : page.losesData ? qsTr("Erase %1?").arg(page.disk.title) : qsTr("Use All of %1?").arg(page.disk.title)
+        title: !page.disk ? "" : page.losesData ? qsTr("Erase %1?").arg(page.disk.title) : qsTr("Use all of %1?").arg(page.disk.title)
         text: !page.disk ? "" : page.losesData ? page.disk.eraseText + " " + qsTr("This can't be undone.") : qsTr("Nothing was found on this disk. If it does hold anything, it is erased.")
         acceptText: page.losesData ? qsTr("Erase and Install") : qsTr("Install")
         focusReject: true
