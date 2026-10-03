@@ -34,6 +34,8 @@ pub mod qobject {
         #[qproperty(QString, wifi_uuid, cxx_name = "wifiUuid")]
         #[qproperty(bool, secure_boot, cxx_name = "secureBoot")]
         #[qproperty(bool, nvidia)]
+        /// The smallest disk, as the Disk page says it ("40 GB").
+        #[qproperty(QString, min_disk_size, cxx_name = "minDiskSize")]
         /// "idle", "running", "done" or "failed".
         #[qproperty(QString, install_state, cxx_name = "installState")]
         #[qproperty(f64, progress)]
@@ -61,7 +63,17 @@ pub mod qobject {
         fn refresh_wifi(self: Pin<&mut Backend>, scan: bool);
         #[qinvokable]
         #[cxx_name = "connectWifi"]
-        fn connect_wifi(self: Pin<&mut Backend>, ssid: &QString, password: &QString, hidden: bool);
+        /// `ssid_hex`: the scanned network's SSID bytes in hex (from the
+        /// list); empty for a hidden network, whose typed name is used.
+        /// `security` (hidden networks): "none", "wpa" or "sae".
+        fn connect_wifi(
+            self: Pin<&mut Backend>,
+            ssid: &QString,
+            ssid_hex: &QString,
+            password: &QString,
+            hidden: bool,
+            security: &QString,
+        );
         #[qinvokable]
         #[cxx_name = "clearWifiError"]
         fn clear_wifi_error(self: Pin<&mut Backend>);
@@ -132,8 +144,20 @@ fn rt() -> &'static tokio::runtime::Runtime {
 
 /// One system bus connection, shared by the helper and NetworkManager clients.
 pub async fn system_bus() -> zbus::Result<zbus::Connection> {
-    static BUS: tokio::sync::OnceCell<zbus::Connection> = tokio::sync::OnceCell::const_new();
-    BUS.get_or_try_init(zbus::Connection::system).await.cloned()
+    if let Some(c) = SYSTEM_BUS.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        return Ok(c);
+    }
+    let c = zbus::Connection::system().await?;
+    *SYSTEM_BUS.lock().unwrap_or_else(|e| e.into_inner()) = Some(c.clone());
+    Ok(c)
+}
+
+static SYSTEM_BUS: std::sync::Mutex<Option<zbus::Connection>> = std::sync::Mutex::new(None);
+
+/// Forget the shared connection after it broke, so the next call opens a
+/// new one.
+pub fn reset_system_bus() {
+    *SYSTEM_BUS.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// Runs a task's work so that a panic comes back as an error: every task
@@ -149,9 +173,56 @@ async fn guarded<T, E>(
 }
 
 fn helper_err(message: String) -> helper::Error {
-    helper::Error {
-        busy: false,
-        message,
+    helper::Error::new(message)
+}
+
+/// How often Status is asked while following an install, and how many
+/// answers in a row may be missing before the install counts as lost.
+const FOLLOW_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+const FOLLOW_MISSES: u32 = 30;
+
+/// Follows an install by asking Status until the helper says it is done or
+/// failed. `lost` is the error of the call that dropped, if any: it is what
+/// the user gets if the helper turns out to know of no install, or can't be
+/// reached for a minute.
+async fn follow_status(
+    flags: Option<Flags>,
+    progress: impl Fn(f64, String),
+    lost: Option<helper::Error>,
+) -> Result<view::Done, helper::Error> {
+    let give_up = |e: helper::Error| lost.clone().unwrap_or(e);
+    let mut misses = 0;
+    loop {
+        tokio::time::sleep(if flags.is_some() {
+            std::time::Duration::from_millis(500)
+        } else {
+            FOLLOW_EVERY
+        })
+        .await;
+        let r = match &flags {
+            Some(f) => Ok(demo::status(f)),
+            None => helper::status().await,
+        };
+        let r = r.and_then(|json| view::reattach(&json).map_err(helper_err));
+        match r.map(view::follow) {
+            Ok(view::Follow::Wait { fraction, text }) => {
+                misses = 0;
+                progress(fraction, text);
+            }
+            Ok(view::Follow::Done(d)) => return Ok(d),
+            Ok(view::Follow::Failed(m)) => return Err(helper::Error::new(m)),
+            Ok(view::Follow::Gone) => {
+                return Err(give_up(helper::Error::new(
+                    "The installer service stopped before the install finished.",
+                )));
+            }
+            Err(e) => {
+                misses += 1;
+                if misses >= FOLLOW_MISSES {
+                    return Err(give_up(e));
+                }
+            }
+        }
     }
 }
 
@@ -174,6 +245,7 @@ pub struct BackendRust {
     wifi_uuid: QString,
     secure_boot: bool,
     nvidia: bool,
+    min_disk_size: QString,
     install_state: QString,
     progress: f64,
     progress_text: QString,
@@ -216,6 +288,7 @@ impl Default for BackendRust {
             wifi_uuid: QString::default(),
             secure_boot: false,
             nvidia: false,
+            min_disk_size: q(&view::min_disk_size()),
             install_state: q("idle"),
             progress: 0.0,
             progress_text: QString::default(),
@@ -264,6 +337,101 @@ impl qobject::Backend {
         }
         self.as_mut().refresh_disks();
         self.as_mut().refresh_wifi(true);
+        self.as_mut().reattach();
+    }
+
+    /// A UI that starts while the helper is installing (or has installed)
+    /// picks the install up where it is.
+    fn reattach(self: Pin<&mut Self>) {
+        let flags = self.rust().flags.clone();
+        let qt = self.qt_thread();
+        rt().spawn(async move {
+            let r = guarded(
+                async {
+                    let json = match &flags {
+                        Some(f) => demo::status(f),
+                        None => helper::status().await?,
+                    };
+                    view::reattach(&json).map_err(helper_err)
+                },
+                helper_err,
+            )
+            .await;
+            let r = match r {
+                Ok(r) => r,
+                Err(e) => {
+                    // No helper (a desktop, a demo): the Disk page says so
+                    eprintln!(
+                        "atlas-installer: couldn't ask for the install's state: {}",
+                        e.message
+                    );
+                    return;
+                }
+            };
+            let _ = qt.queue(move |mut obj| obj.as_mut().apply_reattach(r, flags));
+        });
+    }
+
+    fn apply_reattach(mut self: Pin<&mut Self>, r: view::Reattach, flags: Option<Flags>) {
+        // The user got there first (a very slow answer): leave it alone.
+        if self.install_state().to_string() != "idle" {
+            return;
+        }
+        if r != view::Reattach::Idle {
+            // (the pages follow install_state, see Main.qml)
+            eprintln!(
+                "atlas-installer: an install is already known to the helper; opening at {}",
+                r.page()
+            );
+        }
+        match r {
+            view::Reattach::Idle => {}
+            view::Reattach::Running { fraction, text } => {
+                self.as_mut().set_install_error(QString::default());
+                self.as_mut().set_install_state(q("running"));
+                self.as_mut().on_progress(fraction, &text);
+                let qt = self.qt_thread();
+                rt().spawn(async move {
+                    let qt_progress = qt.clone();
+                    let progress = move |fraction: f64, text: String| {
+                        let _ = qt_progress
+                            .queue(move |mut obj| obj.as_mut().on_progress(fraction, &text));
+                    };
+                    let r = guarded(follow_status(flags, progress, None), helper_err).await;
+                    let _ = qt.queue(move |mut obj| obj.as_mut().finish_install(r));
+                });
+            }
+            view::Reattach::Done(done) => {
+                self.as_mut().set_install_began(true);
+                self.as_mut().finish_install(Ok(done));
+            }
+            view::Reattach::Failed(message) => {
+                self.as_mut().set_install_began(true);
+                self.as_mut()
+                    .finish_install(Err(helper::Error::new(message)));
+            }
+        }
+    }
+
+    /// The install ended, one way or the other.
+    fn finish_install(mut self: Pin<&mut Self>, r: Result<view::Done, helper::Error>) {
+        match r {
+            Ok(done) => {
+                let json = serde_json::to_string(&done).unwrap_or_else(|_| "{}".into());
+                if self.install_state().to_string() == "idle" {
+                    // reattached to a finished install
+                    self.as_mut().set_progress(1.0);
+                } else {
+                    self.as_mut().on_progress(1.0, "Finishing up");
+                }
+                self.as_mut().set_result_json(q(&json));
+                self.as_mut().set_install_state(q("done"));
+            }
+            Err(e) => {
+                self.as_mut().set_install_error(q(&e.message));
+                self.as_mut().set_install_state(q("failed"));
+            }
+        }
     }
 
     pub fn refresh_disks(mut self: Pin<&mut Self>) {
@@ -375,8 +543,10 @@ impl qobject::Backend {
     pub fn connect_wifi(
         mut self: Pin<&mut Self>,
         ssid: &QString,
+        ssid_hex: &QString,
         password: &QString,
         hidden: bool,
+        security: &QString,
     ) {
         if !self.wifi_connecting().is_empty() {
             return;
@@ -386,6 +556,14 @@ impl qobject::Backend {
         if ssid.trim().is_empty() {
             return;
         }
+        // A listed network is connected to by its bytes; a hidden one by
+        // the name that was typed.
+        let raw = match network::ssid_from_hex(&ssid_hex.to_string()) {
+            Some(b) if !hidden => b,
+            _ => ssid.as_bytes().to_vec(),
+        };
+        let hidden_security =
+            hidden.then(|| network::hidden_security(&security.to_string(), &password));
         self.as_mut().set_wifi_error(QString::default());
         self.as_mut().set_wifi_connecting(q(&ssid));
         let flags = self.rust().flags.clone();
@@ -395,7 +573,7 @@ impl qobject::Backend {
                 async {
                     match &flags {
                         Some(_) => demo::connect(&ssid, &password).await,
-                        None => network::connect(&ssid, &password, hidden).await,
+                        None => network::connect(&raw, &password, hidden_security).await,
                     }
                 },
                 |e| e,
@@ -485,39 +663,47 @@ impl qobject::Backend {
         let qt = self.qt_thread();
         let qt_progress = qt.clone();
         rt().spawn(async move {
+            let qt_follow = qt_progress.clone();
             let progress = move |fraction: f64, text: String| {
                 let _ = qt_progress.queue(move |mut obj| obj.as_mut().on_progress(fraction, &text));
             };
             let r = guarded(
                 async {
-                    match &flags {
+                    let r = match &flags {
                         Some(f) => demo::install(f, progress).await,
                         None => helper::install(args, progress).await,
+                    };
+                    match r {
+                        // Install succeeded even if its answer can't be
+                        // read: never offer to install again over a
+                        // finished system.
+                        Ok(json) => {
+                            Ok(
+                                view::done_from_outcome(&json).unwrap_or_else(|m| view::Done {
+                                    warnings: vec![format!(
+                                        "The installer's report couldn't be read ({m})."
+                                    )],
+                                    ..Default::default()
+                                }),
+                            )
+                        }
+                        // The call was lost, not refused: the install may
+                        // be going on. Ask the helper until it says.
+                        Err(e) if e.transient => {
+                            let progress = move |fraction: f64, text: String| {
+                                let _ = qt_follow.queue(move |mut obj| {
+                                    obj.as_mut().on_progress(fraction, &text)
+                                });
+                            };
+                            follow_status(flags.clone(), progress, Some(e)).await
+                        }
+                        Err(e) => Err(e),
                     }
                 },
                 helper_err,
             )
             .await;
-            // Install succeeded even if its answer can't be read: never
-            // offer to install again over a finished system.
-            let r = r.map(|json| {
-                view::done_from_outcome(&json).unwrap_or_else(|m| view::Done {
-                    warnings: vec![format!("The installer's report couldn't be read ({m}).")],
-                    ..Default::default()
-                })
-            });
-            let _ = qt.queue(move |mut obj| match r {
-                Ok(done) => {
-                    let json = serde_json::to_string(&done).unwrap_or_else(|_| "{}".into());
-                    obj.as_mut().on_progress(1.0, "Finishing up");
-                    obj.as_mut().set_result_json(q(&json));
-                    obj.as_mut().set_install_state(q("done"));
-                }
-                Err(e) => {
-                    obj.as_mut().set_install_error(q(&e.message));
-                    obj.as_mut().set_install_state(q("failed"));
-                }
-            });
+            let _ = qt.queue(move |mut obj| obj.as_mut().finish_install(r));
         });
     }
 

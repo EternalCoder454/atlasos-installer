@@ -37,6 +37,10 @@ trait Device {
     fn state(&self) -> zbus::Result<u32>;
     #[zbus(property)]
     fn active_connection(&self) -> zbus::Result<OwnedObjectPath>;
+    /// (new state, old state, reason)
+    #[zbus(signal, name = "StateChanged")]
+    fn device_state_changed(&self, new_state: u32, old_state: u32, reason: u32)
+    -> zbus::Result<()>;
 }
 
 #[zbus::proxy(
@@ -97,6 +101,8 @@ const DEVICE_WIFI: u32 = 2;
 const DEVICE_ACTIVATED: u32 = 100;
 const ACTIVE_ACTIVATED: u32 = 2;
 const ACTIVE_DEACTIVATED: u32 = 4;
+const DEVICE_DISCONNECTED: u32 = 30;
+const DEVICE_FAILED: u32 = 120;
 
 /// How a network is secured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -143,9 +149,29 @@ impl Security {
     }
 }
 
+/// An SSID is up to 32 raw bytes, not necessarily text: the bytes go to
+/// NetworkManager as they came, and the name shown is a lossy reading.
+pub fn ssid_hex(raw: &[u8]) -> String {
+    raw.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The bytes behind [`ssid_hex`]; `None` if it isn't one.
+pub fn ssid_from_hex(hex: &str) -> Option<Vec<u8>> {
+    if hex.is_empty() || !hex.len().is_multiple_of(2) || !hex.is_ascii() {
+        return None;
+    }
+    (0..hex.len() / 2)
+        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok())
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Network {
+    /// For display (invalid UTF-8 shown as replacement characters).
     pub ssid: String,
+    /// The SSID's bytes in hex: what identifies the network, and what
+    /// `connect` takes.
+    pub ssid_hex: String,
     /// 0 to 100.
     pub strength: u8,
     pub security: Security,
@@ -171,10 +197,11 @@ pub struct WifiState {
 pub fn merge(aps: Vec<Network>) -> Vec<Network> {
     let mut out: Vec<Network> = Vec::new();
     for ap in aps {
-        if ap.ssid.trim().is_empty() {
+        let blank = ssid_from_hex(&ap.ssid_hex).is_none_or(|b| b.iter().all(|c| *c == 0));
+        if blank || ap.ssid.trim().is_empty() {
             continue;
         }
-        match out.iter_mut().find(|n| n.ssid == ap.ssid) {
+        match out.iter_mut().find(|n| n.ssid_hex == ap.ssid_hex) {
             Some(n) => {
                 n.active |= ap.active;
                 if ap.strength > n.strength {
@@ -309,6 +336,7 @@ pub async fn state(scan: bool) -> Result<WifiState, String> {
         };
         aps.push(Network {
             ssid: String::from_utf8_lossy(&ssid).into_owned(),
+            ssid_hex: ssid_hex(&ssid),
             strength,
             security: Security::from_flags(flags, wpa, rsn),
             active: p == current,
@@ -340,7 +368,8 @@ pub async fn state(scan: bool) -> Result<WifiState, String> {
 /// The settings of a new system-wide connection. The password is stored in
 /// the keyfile (`psk-flags` 0), which the helper copies.
 fn settings<'a>(
-    ssid: &'a str,
+    ssid: &'a [u8],
+    id: &'a str,
     uuid: &'a str,
     password: &'a str,
     security: Security,
@@ -350,7 +379,7 @@ fn settings<'a>(
     s.insert(
         "connection",
         HashMap::from([
-            ("id", Value::from(ssid)),
+            ("id", Value::from(id)),
             ("uuid", Value::from(uuid)),
             ("type", Value::from("802-11-wireless")),
             ("autoconnect", Value::from(true)),
@@ -359,7 +388,7 @@ fn settings<'a>(
     s.insert(
         "802-11-wireless",
         HashMap::from([
-            ("ssid", Value::from(ssid.as_bytes().to_vec())),
+            ("ssid", Value::from(ssid.to_vec())),
             ("mode", Value::from("infrastructure")),
             ("hidden", Value::from(hidden)),
         ]),
@@ -424,19 +453,34 @@ fn wep_key(k: &str) -> bool {
         || matches!(k.len(), 10 | 26) && k.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// The security a hidden network is set up with, from the page's choice:
+/// "none", "wpa" (WPA and WPA2 Personal) or "sae" (WPA3 Personal). Anything
+/// else is guessed from the password, as before the choice existed.
+pub fn hidden_security(choice: &str, password: &str) -> Security {
+    match choice {
+        "none" => Security::Open,
+        "wpa" => Security::Psk,
+        "sae" => Security::Sae,
+        _ if password.is_empty() => Security::Open,
+        _ => Security::Psk,
+    }
+}
+
 /// Connects and waits until NetworkManager says it worked. Returns the
-/// new connection's UUID. A failed connection is deleted again.
-pub async fn connect(ssid: &str, password: &str, hidden: bool) -> Result<String, String> {
+/// new connection's UUID. A failed connection is deleted again. `ssid` is
+/// the network's bytes; `hidden` is the security chosen for a network that
+/// doesn't show up in the scan.
+pub async fn connect(
+    ssid: &[u8],
+    password: &str,
+    hidden: Option<Security>,
+) -> Result<String, String> {
+    let name = String::from_utf8_lossy(ssid).into_owned();
     let c = conn().await?;
     let (Some(dev), _) = devices(&c).await? else {
         return Err("There is no Wi-Fi adapter.".into());
     };
-    let (security, ap) = if hidden {
-        let s = if password.is_empty() {
-            Security::Open
-        } else {
-            Security::Psk
-        };
+    let (security, ap) = if let Some(s) = hidden {
         (s, None)
     } else {
         let w = wireless(&c, &dev).await.map_err(err)?;
@@ -459,31 +503,31 @@ pub async fn connect(ssid: &str, password: &str, hidden: bool) -> Result<String,
             ) else {
                 continue;
             };
-            if s == ssid.as_bytes() && best.as_ref().is_none_or(|b| st > b.0) {
+            if s == ssid && best.as_ref().is_none_or(|b| st > b.0) {
                 best = Some((st, Security::from_flags(f, wpa, rsn), p));
             }
         }
         let Some((_, s, p)) = best else {
-            return Err(format!("{ssid} is out of range."));
+            return Err(format!("{name} is out of range."));
         };
         (s, Some(p))
     };
     if security == Security::Enterprise {
         return Err(format!(
-            "{ssid} uses WPA Enterprise, which the installer can't set up. Choose another network or set it up after installing."
+            "{name} uses WPA Enterprise, which the installer can't set up. Choose another network or set it up after installing."
         ));
     }
-    // A hidden network's security is a guess (WPA2): only check what it is sure of.
-    if !hidden {
-        check_password(ssid, security, password)?;
-    }
+    check_password(&name, security, password)?;
     let uuid = new_uuid()?;
     let nm = NetworkManagerProxy::new(&c).await.map_err(err)?;
     let root = ObjectPath::try_from("/").expect("root path");
     let specific = ap.as_ref().map_or(root.clone(), |p| p.as_ref());
+    // Listen to the adapter before starting, so the reason it gives for a
+    // failure is not missed.
+    let reason = watch_reason(&c, &dev).await;
     let (settings_path, active_path) = nm
         .add_and_activate_connection(
-            settings(ssid, &uuid, password, security, hidden),
+            settings(ssid, &name, &uuid, password, security, hidden.is_some()),
             &dev.as_ref(),
             &specific,
         )
@@ -491,7 +535,7 @@ pub async fn connect(ssid: &str, password: &str, hidden: bool) -> Result<String,
         .map_err(err)?;
     // From here on, a failure deletes the connection again: it holds the
     // password and would keep autoconnecting.
-    let r = wait_activated(&c, &active_path, &uuid, ssid, security).await;
+    let r = wait_activated(&c, &active_path, &uuid, &name, security, reason).await;
     if r.is_err()
         && let Ok(b) = SettingsConnectionProxy::builder(&c).path(settings_path.clone())
         && let Ok(s) = b.build().await
@@ -501,29 +545,128 @@ pub async fn connect(ssid: &str, password: &str, hidden: bool) -> Result<String,
     r
 }
 
+/// The reason (NMDeviceStateReason) the adapter last gave for failing or
+/// disconnecting, kept up by a task that ends with the connect.
+type Reason = std::sync::Arc<std::sync::Mutex<Option<u32>>>;
+
+struct Watch {
+    reason: Reason,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn watch_reason(c: &zbus::Connection, dev: &OwnedObjectPath) -> Watch {
+    let reason: Reason = Default::default();
+    let kept = reason.clone();
+    let stream = match device(c, dev).await {
+        Ok(d) => d.receive_device_state_changed().await.ok(),
+        Err(_) => None,
+    };
+    let task = tokio::spawn(async move {
+        let Some(mut stream) = stream else { return };
+        while let Some(sig) = futures_util::StreamExt::next(&mut stream).await {
+            if let Ok(a) = sig.args()
+                && matches!(a.new_state, DEVICE_FAILED | DEVICE_DISCONNECTED)
+                && !matches!(
+                    a.reason,
+                    REASON_NONE | REASON_UNKNOWN | REASON_USER_REQUESTED | REASON_NEW_ACTIVATION
+                )
+            {
+                *kept.lock().unwrap_or_else(|e| e.into_inner()) = Some(a.reason);
+            }
+        }
+    });
+    Watch { reason, task }
+}
+
+// NMDeviceStateReason
+const REASON_NONE: u32 = 0;
+const REASON_UNKNOWN: u32 = 1;
+const REASON_CONFIG_FAILED: u32 = 4;
+const REASON_IP_CONFIG_UNAVAILABLE: u32 = 5;
+const REASON_IP_CONFIG_EXPIRED: u32 = 6;
+const REASON_NO_SECRETS: u32 = 7;
+const REASON_SUPPLICANT_DISCONNECT: u32 = 8;
+const REASON_SUPPLICANT_CONFIG_FAILED: u32 = 9;
+const REASON_SUPPLICANT_FAILED: u32 = 10;
+const REASON_SUPPLICANT_TIMEOUT: u32 = 11;
+const REASON_DHCP_START_FAILED: u32 = 15;
+const REASON_DHCP_ERROR: u32 = 16;
+const REASON_DHCP_FAILED: u32 = 17;
+const REASON_USER_REQUESTED: u32 = 39;
+const REASON_SSID_NOT_FOUND: u32 = 53;
+const REASON_NEW_ACTIVATION: u32 = 60;
+
+/// What to tell the user when NetworkManager gave up. Only a secrets
+/// failure blames the password; `reason` is `None` when it gave none
+/// (we stopped waiting).
+fn failure_message(ssid: &str, security: Security, reason: Option<u32>) -> String {
+    match reason {
+        Some(REASON_NO_SECRETS | REASON_SUPPLICANT_DISCONNECT) if security.needs_password() => {
+            format!("Couldn't connect to {ssid}. Check the password and try again.")
+        }
+        Some(REASON_SSID_NOT_FOUND) => {
+            format!("Couldn't reach {ssid}. It may be out of range: move closer and try again.")
+        }
+        Some(REASON_SUPPLICANT_TIMEOUT) | None => {
+            format!("Connecting to {ssid} timed out. Try again.")
+        }
+        Some(
+            REASON_DHCP_START_FAILED
+            | REASON_DHCP_ERROR
+            | REASON_DHCP_FAILED
+            | REASON_IP_CONFIG_UNAVAILABLE
+            | REASON_IP_CONFIG_EXPIRED,
+        ) => format!(
+            "Connected to {ssid}, but it didn't give the computer an address (DHCP failed). Try again, or try another network."
+        ),
+        Some(REASON_SUPPLICANT_CONFIG_FAILED | REASON_SUPPLICANT_FAILED | REASON_CONFIG_FAILED) => {
+            format!("Couldn't connect to {ssid}: the Wi-Fi adapter couldn't use these settings.")
+        }
+        Some(_) => format!("Couldn't connect to {ssid}. Try again, or try another network."),
+    }
+}
+
 async fn wait_activated(
     c: &zbus::Connection,
     active_path: &OwnedObjectPath,
     uuid: &str,
     ssid: &str,
     security: Security,
+    watch: Watch,
 ) -> Result<String, String> {
-    let failed = || {
-        if security.needs_password() {
-            format!("Couldn't connect to {ssid}. Check the password and try again.")
-        } else {
-            format!("Couldn't connect to {ssid}.")
-        }
+    // `timed_out`: we stopped waiting; else NetworkManager gave up, and
+    // an unnamed reason is "unknown", not a timeout.
+    let failed = |timed_out: bool| {
+        let reason = *watch.reason.lock().unwrap_or_else(|e| e.into_inner());
+        failure_message(
+            ssid,
+            security,
+            reason.or(if timed_out {
+                None
+            } else {
+                Some(REASON_UNKNOWN)
+            }),
+        )
     };
-    let a = active(c, active_path).await.map_err(|_| failed())?;
+    let a = active(c, active_path).await.map_err(|_| failed(false))?;
     for _ in 0..150 {
         match a.state().await {
             Ok(ACTIVE_ACTIVATED) => return Ok(uuid.to_string()),
-            Ok(ACTIVE_DEACTIVATED) | Err(_) => return Err(failed()),
+            Ok(ACTIVE_DEACTIVATED) | Err(_) => {
+                // a moment for the adapter's last word to arrive
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                return Err(failed(false));
+            }
             Ok(_) => tokio::time::sleep(Duration::from_millis(300)).await,
         }
     }
-    Err(failed())
+    Err(failed(true))
 }
 
 #[cfg(test)]
@@ -549,6 +692,7 @@ mod tests {
     fn n(ssid: &str, strength: u8, active: bool) -> Network {
         Network {
             ssid: ssid.into(),
+            ssid_hex: ssid_hex(ssid.as_bytes()),
             strength,
             security: Security::Psk,
             active,
@@ -596,14 +740,111 @@ mod tests {
 
     #[test]
     fn psk_settings_keep_the_password_in_the_keyfile() {
-        let s = settings("Home", "u", "secret", Security::Psk, false);
+        let s = settings(b"Home", "Home", "u", "secret", Security::Psk, false);
         let sec = &s["802-11-wireless-security"];
         assert_eq!(sec["key-mgmt"], Value::from("wpa-psk"));
         assert_eq!(sec["psk-flags"], Value::from(0u32));
         assert!(!s.contains_key("permissions"));
         assert!(
-            !settings("Open", "u", "", Security::Open, true)
+            !settings(b"Open", "Open", "u", "", Security::Open, true)
                 .contains_key("802-11-wireless-security")
         );
+    }
+
+    #[test]
+    fn ssids_keep_their_bytes() {
+        // Latin-1 "Caf\xe9": not UTF-8
+        let raw = b"Caf\xe9";
+        assert_eq!(ssid_hex(raw), "436166e9");
+        assert_eq!(ssid_from_hex("436166e9").unwrap(), raw);
+        assert_eq!(ssid_from_hex(""), None);
+        assert_eq!(ssid_from_hex("abc"), None);
+        assert_eq!(ssid_from_hex("zz"), None);
+        assert_eq!(ssid_from_hex("é1"), None);
+        let net = Network {
+            ssid: String::from_utf8_lossy(raw).into_owned(),
+            ssid_hex: ssid_hex(raw),
+            strength: 50,
+            security: Security::Psk,
+            active: false,
+        };
+        assert_eq!(net.ssid, "Caf\u{fffd}");
+        // the connection is made with the original bytes, and named lossily
+        let s = settings(raw, &net.ssid, "u", "secret", Security::Psk, false);
+        assert_eq!(s["802-11-wireless"]["ssid"], Value::from(raw.to_vec()));
+        assert_eq!(s["connection"]["id"], Value::from("Caf\u{fffd}"));
+    }
+
+    #[test]
+    fn networks_that_read_alike_stay_apart() {
+        let a = Network {
+            ssid_hex: ssid_hex(b"Caf\xe9"),
+            ssid: "Caf\u{fffd}".into(),
+            ..n("", 40, false)
+        };
+        let b = Network {
+            ssid_hex: ssid_hex(b"Caf\xe8"),
+            ..a.clone()
+        };
+        assert_eq!(merge(vec![a.clone(), b, a]).len(), 2);
+        // a name of NULs is a hidden network
+        let hidden = Network {
+            ssid_hex: ssid_hex(&[0, 0, 0]),
+            ssid: "\0\0\0".into(),
+            ..n("x", 90, false)
+        };
+        assert!(merge(vec![hidden]).is_empty());
+    }
+
+    #[test]
+    fn a_hidden_network_uses_the_chosen_security() {
+        assert_eq!(hidden_security("none", "x"), Security::Open);
+        assert_eq!(hidden_security("wpa", ""), Security::Psk);
+        assert_eq!(hidden_security("sae", "x"), Security::Sae);
+        assert_eq!(hidden_security("", ""), Security::Open);
+        assert_eq!(hidden_security("", "secret12"), Security::Psk);
+        let s = settings(b"H", "H", "u", "secret12", Security::Sae, true);
+        assert_eq!(
+            s["802-11-wireless-security"]["key-mgmt"],
+            Value::from("sae")
+        );
+        assert_eq!(s["802-11-wireless"]["hidden"], Value::from(true));
+        let s = settings(b"H", "H", "u", "secret12", Security::Psk, true);
+        assert_eq!(
+            s["802-11-wireless-security"]["key-mgmt"],
+            Value::from("wpa-psk")
+        );
+        assert!(
+            !settings(b"H", "H", "u", "", Security::Open, true)
+                .contains_key("802-11-wireless-security")
+        );
+    }
+
+    #[test]
+    fn only_secret_failures_blame_the_password() {
+        let psk = Security::Psk;
+        let pw = |r| failure_message("Home", psk, r).contains("password");
+        assert!(pw(Some(REASON_NO_SECRETS)));
+        assert!(pw(Some(REASON_SUPPLICANT_DISCONNECT)));
+        for r in [
+            None,
+            Some(REASON_SUPPLICANT_TIMEOUT),
+            Some(REASON_SSID_NOT_FOUND),
+            Some(REASON_DHCP_FAILED),
+            Some(REASON_DHCP_ERROR),
+            Some(REASON_IP_CONFIG_UNAVAILABLE),
+            Some(REASON_SUPPLICANT_FAILED),
+            Some(REASON_CONFIG_FAILED),
+            Some(999),
+        ] {
+            assert!(!pw(r), "{r:?}: {}", failure_message("Home", psk, r));
+        }
+        // an open network has no password to blame
+        assert!(
+            !failure_message("Cafe", Security::Open, Some(REASON_NO_SECRETS)).contains("password")
+        );
+        assert!(failure_message("Home", psk, None).contains("timed out"));
+        assert!(failure_message("Home", psk, Some(REASON_DHCP_FAILED)).contains("DHCP"));
+        assert!(failure_message("Home", psk, Some(REASON_SSID_NOT_FOUND)).contains("out of range"));
     }
 }

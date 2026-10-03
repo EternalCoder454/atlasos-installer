@@ -16,10 +16,13 @@
 //! | `mok` | NVIDIA with Secure Boot on: the Restart page shows a MOK password |
 //! | `warn` | The install succeeds with warnings |
 //! | `fast` | The install takes 2 seconds instead of 20 |
+//! | `running` | The helper is already installing, at 42 %: the UI starts on the Progress page and follows it (as after a crash) |
+//! | `finished` | The helper has finished installing: the UI starts on the Restart page (`mok`, `warn` and `cd` apply) |
 //! | `cd` | Started from a disc, not a USB stick (the Restart page's wording) |
 //!
 //! `ATLAS_INSTALLER_DEMO_PAGE=<step>` opens at a step (welcome, keyboard,
 //! wifi, disk, review, progress, restart), with the first disk chosen.
+//! `wifi-hidden` opens the Wi-Fi page with the "Other Network" form open.
 
 use std::time::Duration;
 
@@ -42,6 +45,8 @@ pub struct Flags {
     pub warn: bool,
     pub fast: bool,
     pub cd: bool,
+    pub running: bool,
+    pub finished: bool,
 }
 
 /// `None` unless `ATLAS_INSTALLER_DEMO` is set (and not empty or `0`).
@@ -75,6 +80,8 @@ pub fn parse(v: &str) -> Option<Flags> {
             "hold" => f.hold = true,
             "mok" => f.mok = true,
             "cd" => f.cd = true,
+            "running" => f.running = true,
+            "finished" => f.finished = true,
             "warn" => f.warn = true,
             "fast" => f.fast = true,
             _ => {}
@@ -118,6 +125,7 @@ pub async fn list_disks(f: &Flags) -> Result<String, helper::Error> {
 fn net(ssid: &str, strength: u8, security: Security) -> Network {
     Network {
         ssid: ssid.into(),
+        ssid_hex: crate::network::ssid_hex(ssid.as_bytes()),
         strength,
         security,
         active: false,
@@ -204,6 +212,36 @@ pub async fn install(f: &Flags, progress: impl Fn(f64, String)) -> Result<String
         x = (x + 0.01).min(1.0);
     }
     progress(1.0, "Finishing up".into());
+    Ok(outcome(f))
+}
+
+/// What the helper's Status says: `running` and `finished` are installs
+/// that began before the UI did.
+pub fn status(f: &Flags) -> String {
+    if f.finished {
+        serde_json::json!({
+            "state": "done", "step": "finish", "fraction": 1.0,
+            "text": "Finishing up", "result": serde_json::from_str::<serde_json::Value>(&outcome(f)).expect("outcome"),
+            "error": null,
+        })
+        .to_string()
+    } else if f.running {
+        serde_json::json!({
+            "state": "installing", "step": "copy", "fraction": 0.42,
+            "text": text_at(0.42), "result": null, "error": null,
+        })
+        .to_string()
+    } else {
+        serde_json::json!({
+            "state": "idle", "step": "", "fraction": 0.0,
+            "text": "", "result": null, "error": null,
+        })
+        .to_string()
+    }
+}
+
+/// Install's answer.
+fn outcome(f: &Flags) -> String {
     let done = Done {
         mok_password: if f.mok {
             "48201937".into()
@@ -219,14 +257,14 @@ pub async fn install(f: &Flags, progress: impl Fn(f64, String)) -> Result<String
         },
         log: "/run/atlas-installer/install.log".into(),
     };
-    Ok(serde_json::json!({
+    serde_json::json!({
         "mok_password": if done.mok_password.is_empty() { None } else { Some(done.mok_password) },
         "windows_entry": done.windows_entry,
         "boot_media": done.boot_media,
         "warnings": done.warnings,
         "log": done.log,
     })
-    .to_string())
+    .to_string()
 }
 
 #[cfg(test)]
@@ -240,6 +278,26 @@ mod tests {
         assert_eq!(parse("1"), Some(Flags::default()));
         let f = parse("wired, mok,unknown").unwrap();
         assert!(f.wired && f.mok && !f.fail);
+    }
+
+    #[test]
+    fn status_of_an_install_that_began_before_the_ui() {
+        let state = |flags: &str| -> serde_json::Value {
+            serde_json::from_str(&status(&parse(flags).unwrap())).unwrap()
+        };
+        assert_eq!(state("1")["state"], "idle");
+        assert_eq!(state("running")["state"], "installing");
+        assert_eq!(state("running")["fraction"], 0.42);
+        let done = state("finished,mok");
+        assert_eq!(done["state"], "done");
+        assert_eq!(done["result"]["mok_password"], "48201937");
+        // and the UI reads what the demo says
+        assert_eq!(
+            crate::view::reattach(&status(&parse("finished").unwrap()))
+                .unwrap()
+                .page(),
+            "restart"
+        );
     }
 
     #[test]

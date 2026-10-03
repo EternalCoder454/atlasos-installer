@@ -24,7 +24,7 @@ InstallerPage {
 
     function syncNetworks() {
         if (page.open === "") {
-            page.networks = (page.wifi.networks || []).concat([{ ssid: "\n", strength: 0, security: "psk", active: false }]);
+            page.networks = (page.wifi.networks || []).concat([{ ssid: "\n", ssidHex: "", strength: 0, security: "psk", active: false }]);
         }
     }
     onWifiChanged: page.syncNetworks()
@@ -62,7 +62,7 @@ InstallerPage {
             page.open = "";
         } else if (n.security === "open" || n.security === "owe") {
             page.open = "";
-            page.app.backend.connectWifi(n.ssid, "", false);
+            page.app.backend.connectWifi(n.ssid, n.ssidHex, "", false, "");
         } else {
             page.open = page.open === n.ssid ? "" : n.ssid;
         }
@@ -72,6 +72,10 @@ InstallerPage {
         page.app.backend.clearWifiError();
         page.syncNetworks();
         page.app.backend.refreshWifi(true);
+        // Demo screenshots: the form for a hidden network, open
+        if (page.app.backend.demo && page.app.demoHidden) {
+            page.open = "\n";
+        }
     }
 
     Timer {
@@ -91,43 +95,68 @@ InstallerPage {
         }
     }
 
-    component PasswordBox: RowLayout {
+    component PasswordBox: ColumnLayout {
         id: box
         property string ssid
+        property string ssidHex
         property bool hidden: false
         property bool needsPassword: true
+        // A hidden network doesn't say how it is secured: the user does.
+        readonly property bool noPassword: box.hidden && security.currentValue === "none"
         spacing: Kirigami.Units.largeSpacing
         Layout.fillWidth: true
 
         function go() {
             const name = box.hidden ? nameField.text.trim() : box.ssid;
             if (name.length > 0) {
-                page.app.backend.connectWifi(name, password.text, box.hidden);
+                page.app.backend.connectWifi(name, box.ssidHex, box.noPassword ? "" : password.text, box.hidden, box.hidden ? security.currentValue : "");
             }
         }
 
         Component.onCompleted: (box.hidden ? nameField : password).forceActiveFocus()
 
-        QQC2.TextField {
-            id: nameField
+        RowLayout {
             visible: box.hidden
+            spacing: Kirigami.Units.largeSpacing
             Layout.fillWidth: true
-            placeholderText: qsTr("Network name")
-            Accessible.name: placeholderText
-            onAccepted: password.forceActiveFocus()
+            QQC2.TextField {
+                id: nameField
+                Layout.fillWidth: true
+                placeholderText: qsTr("Network name")
+                Accessible.name: placeholderText
+                enabled: page.connecting.length === 0
+                onAccepted: password.forceActiveFocus()
+            }
+            QQC2.ComboBox {
+                id: security
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+                enabled: page.connecting.length === 0
+                textRole: "text"
+                valueRole: "value"
+                model: [
+                    { text: qsTr("WPA / WPA2 Personal"), value: "wpa" },
+                    { text: qsTr("WPA3 Personal"), value: "sae" },
+                    { text: qsTr("None (open network)"), value: "none" }
+                ]
+                Accessible.name: qsTr("Security")
+            }
         }
-        Kirigami.PasswordField {
-            id: password
+        RowLayout {
+            spacing: Kirigami.Units.largeSpacing
             Layout.fillWidth: true
-            placeholderText: box.hidden ? qsTr("Password (if any)") : qsTr("Password")
-            Accessible.name: placeholderText
-            enabled: page.connecting.length === 0
-            onAccepted: box.go()
-        }
-        PrimaryButton {
-            text: page.connecting.length > 0 ? qsTr("Connecting…") : qsTr("Connect")
-            enabled: page.connecting.length === 0 && (box.hidden ? nameField.text.trim().length > 0 : password.text.length >= (box.needsPassword ? 1 : 0))
-            onClicked: box.go()
+            Kirigami.PasswordField {
+                id: password
+                Layout.fillWidth: true
+                placeholderText: qsTr("Password")
+                Accessible.name: placeholderText
+                enabled: page.connecting.length === 0 && !box.noPassword
+                onAccepted: box.go()
+            }
+            PrimaryButton {
+                text: page.connecting.length > 0 ? qsTr("Connecting…") : qsTr("Connect")
+                enabled: page.connecting.length === 0 && (box.hidden ? nameField.text.trim().length > 0 && (box.noPassword || password.text.length > 0) : password.text.length >= (box.needsPassword ? 1 : 0))
+                onClicked: box.go()
+            }
         }
     }
 
@@ -194,6 +223,7 @@ InstallerPage {
                     active: netRow.expanded
                     sourceComponent: PasswordBox {
                         ssid: netRow.other ? "" : netRow.modelData.ssid
+                        ssidHex: netRow.other ? "" : netRow.modelData.ssidHex
                         hidden: netRow.other
                     }
                 }

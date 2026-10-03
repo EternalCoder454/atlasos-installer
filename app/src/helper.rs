@@ -22,6 +22,7 @@ pub trait InstallerHelper1 {
         keymap: &str,
         wifi_uuid: &str,
     ) -> zbus::Result<String>;
+    fn status(&self) -> zbus::Result<String>;
     fn reboot(&self) -> zbus::Result<()>;
     #[zbus(signal)]
     fn progress(&self, step: &str, fraction: f64, text: &str) -> zbus::Result<()>;
@@ -31,14 +32,25 @@ pub trait InstallerHelper1 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub busy: bool,
+    /// The call didn't get an answer (the connection dropped, the bus
+    /// timed out), so the helper may be fine and still at work: ask Status.
+    pub transient: bool,
     pub message: String,
 }
 
 impl Error {
-    fn new(message: impl Into<String>) -> Error {
+    pub fn new(message: impl Into<String>) -> Error {
         Error {
             busy: false,
+            transient: false,
             message: message.into(),
+        }
+    }
+
+    fn lost(message: impl Into<String>) -> Error {
+        Error {
+            transient: true,
+            ..Error::new(message)
         }
     }
 }
@@ -51,6 +63,7 @@ pub fn describe(name: &str, message: Option<&str>) -> Error {
     match name.strip_prefix(PREFIX) {
         Some("Busy") => Error {
             busy: true,
+            transient: false,
             message: "AtlasOS is already being installed, or the computer is restarting.".into(),
         },
         Some("NotAuthorized") => Error::new("The installer wasn't allowed to change the disks."),
@@ -68,6 +81,12 @@ pub fn describe(name: &str, message: Option<&str>) -> Error {
             | "org.freedesktop.systemd1.NoSuchUnit" => Error::new(
                 "The installer service isn't available. Restart the computer from the installer media and try again.",
             ),
+            "org.freedesktop.DBus.Error.NoReply"
+            | "org.freedesktop.DBus.Error.Disconnected"
+            | "org.freedesktop.DBus.Error.TimedOut"
+            | "org.freedesktop.DBus.Error.NoServer" => Error::lost(format!(
+                "The installer service couldn't be reached ({name})."
+            )),
             _ => Error::new(format!(
                 "The installer service couldn't be reached ({name})."
             )),
@@ -90,9 +109,13 @@ fn map(e: zbus::Error) -> Error {
             let name = fdo_name(&fdo);
             describe(&name, Some(&fdo.to_string()))
         }
-        other => Error::new(format!(
-            "The installer service couldn't be reached: {other}"
-        )),
+        // Input/output and the like: the connection itself broke.
+        other => {
+            crate::backend::reset_system_bus();
+            Error::lost(format!(
+                "The installer service couldn't be reached: {other}"
+            ))
+        }
     }
 }
 
@@ -148,6 +171,12 @@ pub async fn install(
     r
 }
 
+/// The install's state (see `view::reattach`).
+pub async fn status() -> Result<String, Error> {
+    let p = proxy().await?;
+    retry_once!(p.status()).map_err(map)
+}
+
 pub async fn reboot() -> Result<(), Error> {
     let p = proxy().await?;
     retry_once!(p.reboot()).map_err(map)
@@ -184,5 +213,14 @@ mod tests {
                 .contains("AccessDenied")
         );
         assert!(!describe("net.eterneon.atlas.Error.NotAuthorized", None).busy);
+        assert!(!describe("net.eterneon.atlas.Error.Failed", Some("x")).transient);
+    }
+
+    #[test]
+    fn a_call_without_an_answer_is_transient() {
+        assert!(describe("org.freedesktop.DBus.Error.NoReply", None).transient);
+        assert!(describe("org.freedesktop.DBus.Error.Disconnected", None).transient);
+        assert!(!describe("org.freedesktop.DBus.Error.AccessDenied", None).transient);
+        assert!(!describe("net.eterneon.atlas.Error.Busy", None).transient);
     }
 }

@@ -108,7 +108,7 @@ InstallerPage {
                 iconName: page.diskState === "error" ? "window-close-symbolic" : "drive-harddisk-symbolic"
                 tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.highlightColor
                 headline: page.diskState === "error" ? qsTr("Couldn't read the disks") : qsTr("No disk found")
-                subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("AtlasOS needs a disk of at least 40 GB. Connect one, then look again.")
+                subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("AtlasOS needs a disk of at least %1. Connect one, then look again.").arg(page.backend.minDiskSize)
                 SecondaryButton {
                     text: qsTr("Look Again")
                     onClicked: page.backend.refreshDisks()

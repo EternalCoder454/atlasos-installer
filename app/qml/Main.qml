@@ -12,8 +12,11 @@ QQC2.ApplicationWindow {
     // Both come from main.cpp (setInitialProperties).
     required property var backend
     required property bool fullScreen
-    // Demo mode: the step to open at ("" for the first).
+    // Demo mode: the step to open at ("" for the first); "wifi-hidden"
+    // opens the Wi-Fi page with the form for a hidden network.
     required property string demoPage
+    readonly property bool demoHidden: root.demoPage === "wifi-hidden" || root.demoHiddenKept
+    property bool demoHiddenKept: false
 
     title: qsTr("Install AtlasOS")
     width: Kirigami.Units.gridUnit * 64
@@ -137,7 +140,11 @@ QQC2.ApplicationWindow {
     // read. Past the Disk page, the first disk is chosen; the Disk page
     // itself opens as a user would reach it.
     function openDemoPage() {
-        const target = root.demoPage;
+        let target = root.demoPage;
+        if (target === "wifi-hidden") {
+            root.demoHiddenKept = true;
+            target = "wifi";
+        }
         if (!root.backend.demo || target === "" || root.allSteps.findIndex(s => s.key === target) < 0) {
             return;
         }
@@ -202,8 +209,12 @@ QQC2.ApplicationWindow {
             root.openDemoPage();
         }
         function onInstallStateChanged() {
-            if (root.backend.installState === "done") {
+            // Also when the helper was already installing as we started
+            const st = root.backend.installState;
+            if (st === "done") {
                 root.show("restart");
+            } else if (st === "running" || st === "failed") {
+                root.show("progress");
             }
         }
     }

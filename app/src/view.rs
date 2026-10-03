@@ -1,8 +1,8 @@
 //! What the pages show, worked out from the helper's answers. Pure, so it is
 //! unit-tested; QML gets the results as JSON.
 
-use installer_core::GIB;
 use installer_core::disks::{Disk, DiskList};
+use installer_core::{GIB, MIN_INSTALL_BYTES};
 use serde::Serialize;
 
 /// Sizes in binary units with the names Windows uses (a 1 TB disk is
@@ -234,9 +234,181 @@ pub fn done_from_outcome(json: &str) -> Result<Done, String> {
     })
 }
 
+/// The smallest disk AtlasOS installs to, for the Disk page's texts: the
+/// same minimum the helper's disk list uses.
+pub fn min_disk_size() -> String {
+    size(MIN_INSTALL_BYTES)
+}
+
+/// What the helper's Status says about the install, as the UI sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reattach {
+    /// Nothing has been installed by this helper.
+    Idle,
+    Running {
+        fraction: f64,
+        text: String,
+    },
+    Done(Done),
+    Failed(String),
+}
+
+impl Reattach {
+    /// The page a UI that just started opens at.
+    pub fn page(&self) -> &'static str {
+        match self {
+            Reattach::Idle => "welcome",
+            Reattach::Running { .. } | Reattach::Failed(_) => "progress",
+            Reattach::Done(_) => "restart",
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct StatusJson {
+    state: String,
+    #[serde(default)]
+    fraction: f64,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    result: Option<serde_json::Value>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Reads the helper's Status answer.
+pub fn reattach(json: &str) -> Result<Reattach, String> {
+    let s: StatusJson =
+        serde_json::from_str(json).map_err(|e| format!("bad answer from the installer: {e}"))?;
+    match s.state.as_str() {
+        "idle" => Ok(Reattach::Idle),
+        "installing" => Ok(Reattach::Running {
+            fraction: s.fraction,
+            text: s.text,
+        }),
+        "done" => Ok(Reattach::Done(
+            s.result
+                .ok_or_else(|| "no result".to_string())
+                .and_then(|v| done_from_outcome(&v.to_string()))
+                // The install succeeded even if its report can't be read
+                .unwrap_or_else(|m| Done {
+                    warnings: vec![format!("The installer's report couldn't be read ({m}).")],
+                    ..Default::default()
+                }),
+        )),
+        "failed" => Ok(Reattach::Failed(
+            crate::helper::describe("net.eterneon.atlas.Error.Failed", s.error.as_deref()).message,
+        )),
+        other => Err(format!("unknown install state {other:?}")),
+    }
+}
+
+/// What to do after asking Status while following an install whose call
+/// was lost.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Follow {
+    Wait {
+        fraction: f64,
+        text: String,
+    },
+    Done(Done),
+    Failed(String),
+    /// The helper knows of no install: it was not started, or the helper
+    /// restarted and the install died with it.
+    Gone,
+}
+
+pub fn follow(r: Reattach) -> Follow {
+    match r {
+        Reattach::Idle => Follow::Gone,
+        Reattach::Running { fraction, text } => Follow::Wait { fraction, text },
+        Reattach::Done(d) => Follow::Done(d),
+        Reattach::Failed(m) => Follow::Failed(m),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_minimum_disk_size_is_the_cores() {
+        assert_eq!(min_disk_size(), "40 GB");
+        let rows = disk_rows(&fixture());
+        assert!(
+            rows[3].reason.contains(&min_disk_size()),
+            "{}",
+            rows[3].reason
+        );
+    }
+
+    #[test]
+    fn status_picks_the_page() {
+        let page = |j: &str| reattach(j).unwrap().page();
+        assert_eq!(page(r#"{"state":"idle"}"#), "welcome");
+        assert_eq!(
+            page(r#"{"state":"installing","step":"copy","fraction":0.4,"text":"Copying"}"#),
+            "progress"
+        );
+        assert_eq!(
+            page(r#"{"state":"done","result":{"mok_password":null,"windows_entry":false}}"#),
+            "restart"
+        );
+        assert_eq!(
+            page(r#"{"state":"failed","error":"bootc failed"}"#),
+            "progress"
+        );
+        assert!(reattach(r#"{"state":"dancing"}"#).is_err());
+        assert!(reattach("nope").is_err());
+    }
+
+    #[test]
+    fn a_reattached_install_carries_its_progress_result_and_error() {
+        let r = reattach(r#"{"state":"installing","fraction":0.42,"text":"Copying AtlasOS"}"#);
+        assert_eq!(
+            r,
+            Ok(Reattach::Running {
+                fraction: 0.42,
+                text: "Copying AtlasOS".into()
+            })
+        );
+        let Ok(Reattach::Done(d)) = reattach(
+            r#"{"state":"done","fraction":1.0,"result":{"mok_password":"12345678","windows_entry":true,"boot_media":"cd","warnings":["w"],"log":"/l"}}"#,
+        ) else {
+            panic!("done")
+        };
+        assert_eq!(d.mok_password, "12345678");
+        assert_eq!(d.boot_media, "cd");
+        assert_eq!(d.warnings, ["w"]);
+        // an unreadable result still counts as done, with a warning
+        let Ok(Reattach::Done(d)) = reattach(r#"{"state":"done","result":null}"#) else {
+            panic!("done")
+        };
+        assert!(d.warnings[0].contains("couldn't be read"));
+        assert_eq!(
+            reattach(r#"{"state":"failed","error":"the disk changed"}"#),
+            Ok(Reattach::Failed("The disk changed".into()))
+        );
+    }
+
+    #[test]
+    fn a_lost_call_is_followed_until_the_install_ends() {
+        let wait = follow(reattach(r#"{"state":"installing","fraction":0.5,"text":"t"}"#).unwrap());
+        assert!(matches!(wait, Follow::Wait { fraction, .. } if fraction == 0.5));
+        assert!(matches!(
+            follow(reattach(r#"{"state":"done","result":{"windows_entry":false}}"#).unwrap()),
+            Follow::Done(_)
+        ));
+        assert_eq!(
+            follow(reattach(r#"{"state":"failed","error":"x"}"#).unwrap()),
+            Follow::Failed("X".into())
+        );
+        assert_eq!(
+            follow(reattach(r#"{"state":"idle"}"#).unwrap()),
+            Follow::Gone
+        );
+    }
 
     fn fixture() -> DiskList {
         serde_json::from_str(include_str!("../fixtures/disks.json")).unwrap()
