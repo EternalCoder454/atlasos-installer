@@ -133,8 +133,9 @@ QQC2.ApplicationWindow {
         root.show("disk");
     }
 
-    // Demo screenshots: pick the first disk and open at demoPage once the
-    // disks and networks are read.
+    // Demo screenshots: open at demoPage once the disks and networks are
+    // read. Past the Disk page, the first disk is chosen; the Disk page
+    // itself opens as a user would reach it.
     function openDemoPage() {
         const target = root.demoPage;
         if (!root.backend.demo || target === "" || root.allSteps.findIndex(s => s.key === target) < 0) {
@@ -145,7 +146,7 @@ QQC2.ApplicationWindow {
         }
         root.demoPage = "";
         const disks = JSON.parse(root.backend.disksJson);
-        if (disks.length > 0) {
+        if (disks.length > 0 && target !== "disk") {
             root.disk = disks[0];
             root.mode = disks[0].freeOk ? "free-space" : "erase";
         }

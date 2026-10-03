@@ -7,6 +7,8 @@
 //! | `wired` | Connected by cable: the Wi-Fi page is skipped |
 //! | `nowifi` | No Wi-Fi adapter |
 //! | `nodisks` | No disk can be offered |
+//! | `onedisk` | Only the Windows disk, so it is chosen for you |
+//! | `emptydisk` | Only the empty disk |
 //! | `busy` | ListDisks answers Busy |
 //! | `fail` | The install fails while copying |
 //! | `hold` | The install stops moving at 42 % (to screenshot it) |
@@ -28,6 +30,8 @@ pub struct Flags {
     pub wired: bool,
     pub nowifi: bool,
     pub nodisks: bool,
+    pub onedisk: bool,
+    pub emptydisk: bool,
     pub busy: bool,
     pub fail: bool,
     pub hold: bool,
@@ -59,6 +63,8 @@ pub fn parse(v: &str) -> Option<Flags> {
             "wired" => f.wired = true,
             "nowifi" => f.nowifi = true,
             "nodisks" => f.nodisks = true,
+            "onedisk" => f.onedisk = true,
+            "emptydisk" => f.emptydisk = true,
             "busy" => f.busy = true,
             "fail" => f.fail = true,
             "hold" => f.hold = true,
@@ -79,7 +85,17 @@ pub async fn list_disks(f: &Flags) -> Result<String, helper::Error> {
     if f.nodisks {
         return Ok(r#"{"disks":[],"hidden":[]}"#.into());
     }
-    Ok(include_str!("../fixtures/disks.json").into())
+    let all = include_str!("../fixtures/disks.json");
+    let keep = match (f.onedisk, f.emptydisk) {
+        (true, _) => "nvme0n1",
+        (_, true) => "sda",
+        _ => return Ok(all.into()),
+    };
+    let mut list: serde_json::Value = serde_json::from_str(all).expect("fixture");
+    if let Some(disks) = list["disks"].as_array_mut() {
+        disks.retain(|d| d["id"] == keep);
+    }
+    Ok(list.to_string())
 }
 
 fn net(ssid: &str, strength: u8, security: Security) -> Network {

@@ -34,6 +34,8 @@ pub struct DiskRow {
     pub subtitle: String,
     pub icon: &'static str,
     pub usb: bool,
+    /// Nothing on it: erasing loses nothing, so no warning.
+    pub empty: bool,
     /// At least one way to install is possible.
     pub selectable: bool,
     /// Why not, when it isn't.
@@ -112,10 +114,13 @@ fn disk_row(d: &Disk) -> DiskRow {
     } else {
         String::new()
     };
-    let lost = if d.contents.is_empty() {
-        "it is empty".to_string()
+    let review_erase = if d.contents.is_empty() {
+        format!("{} ({size}) is empty. AtlasOS uses all of it.", d.name)
     } else {
-        format!("{} and all files on it are lost", d.description)
+        format!(
+            "{} ({size}) is erased: {} and all files on it are lost.",
+            d.name, d.description
+        )
     };
     DiskRow {
         id: d.id.clone(),
@@ -124,6 +129,7 @@ fn disk_row(d: &Disk) -> DiskRow {
         subtitle: format!("{size} · {what}"),
         icon,
         usb: d.usb,
+        empty: d.contents.is_empty(),
         selectable,
         reason,
         erase_ok: d.erase.possible,
@@ -133,7 +139,7 @@ fn disk_row(d: &Disk) -> DiskRow {
         free_title,
         free_text,
         note,
-        review_erase: format!("{} ({size}) is erased: {lost}.", d.name),
+        review_erase,
         review_free: format!(
             "AtlasOS goes in {} of free space on {} ({size}). {keeps}",
             size_of_free(d.free_space.bytes),
@@ -245,8 +251,9 @@ mod tests {
         assert!(e.free_text.starts_with("This disk has no partitions yet"));
         assert_eq!(
             e.review_erase,
-            "Crucial MX500 (466 GB) is erased: it is empty."
+            "Crucial MX500 (466 GB) is empty. AtlasOS uses all of it."
         );
+        assert!(e.empty && !rows[0].empty);
 
         let b = &rows[2];
         assert!(b.note.contains("BitLocker"));

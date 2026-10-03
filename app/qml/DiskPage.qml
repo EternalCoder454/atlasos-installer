@@ -24,13 +24,32 @@ InstallerPage {
     onPrimary: page.app.next()
     onBack: page.app.previous()
 
+    // A choice held for another disk doesn't carry over. Prefer installing
+    // alongside, which loses nothing; erase is preselected only for an empty
+    // disk, and is otherwise always the user's own click.
     function choose(d) {
+        if (page.app.disk === null || page.app.disk.id !== d.id) {
+            page.app.mode = "";
+        }
         page.app.disk = d;
-        // Keep the choice when it is still possible, else take the only one.
         if (!(page.app.mode === "erase" && d.eraseOk || page.app.mode === "free-space" && d.freeOk)) {
-            page.app.mode = d.freeOk && !d.eraseOk ? "free-space" : d.eraseOk && !d.freeOk ? "erase" : "";
+            page.app.mode = d.freeOk ? "free-space" : d.eraseOk && d.empty ? "erase" : "";
         }
     }
+
+    // The chosen disk went away or changed: don't swap in another unasked.
+    property bool choiceLost: false
+
+    // One disk to choose from: choose it.
+    function chooseOnlyDisk() {
+        const usable = page.disks.filter(d => d.selectable);
+        if (page.app.disk === null && !page.choiceLost && page.diskState === "ready" && usable.length === 1) {
+            page.choose(usable[0]);
+        }
+    }
+
+    // The list is set before the state turns "ready".
+    onDiskStateChanged: page.chooseOnlyDisk()
 
     // The list may be old by now (a disk plugged in or changed): read it
     // again on every visit. onDisksChanged then checks the held choice.
@@ -43,12 +62,14 @@ InstallerPage {
     // After a fresh list, the chosen disk must still be in it, unchanged.
     onDisksChanged: {
         if (page.app.disk === null) {
+            page.chooseOnlyDisk();
             return;
         }
         const same = page.disks.find(d => d.id === page.app.disk.id && d.fingerprint === page.app.disk.fingerprint && d.selectable);
         if (same) {
             page.app.disk = same;
         } else {
+            page.choiceLost = true;
             page.app.disk = null;
             page.app.mode = "";
         }

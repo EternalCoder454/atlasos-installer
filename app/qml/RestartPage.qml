@@ -36,7 +36,9 @@ InstallerPage {
 
             StatusHero {
                 Layout.topMargin: page.mok.length > 0 ? 0 : Kirigami.Units.gridUnit * 2
-                iconName: "checkmark"
+                // Bundled: some icon themes (Dracula) draw "checkmark" at
+                // this size as a filled circle.
+                iconName: "qrc:/qt/qml/net/eterneon/atlas/installer/data/check.svg"
                 tint: Kirigami.Theme.positiveTextColor
                 headline: qsTr("AtlasOS Is Installed")
                 subtitle: qsTr("Remove the USB stick, then restart.")
@@ -49,6 +51,16 @@ InstallerPage {
                 wrapMode: Text.Wrap
                 opacity: 0.7
                 text: qsTr("Windows is still there: choose it in the menu when the computer starts.")
+            }
+
+            QQC2.Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: page.mok.length > 0
+                      ? qsTr("Once AtlasOS starts, you'll create your account.")
+                      : qsTr("After the restart, you'll create your account.")
             }
 
             Section {
@@ -64,13 +76,13 @@ InstallerPage {
                     QQC2.Label {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        text: qsTr("Secure Boot is on, so the computer must trust the AtlasOS key before the NVIDIA driver can load. After the restart a blue screen appears:")
+                        text: qsTr("Secure Boot is on, so the computer must trust the AtlasOS key before the NVIDIA driver can load. After the restart a blue screen appears. It waits only 10 seconds, so stay close:")
                     }
                     Repeater {
                         model: [
                             qsTr("Press any key when it says “Press any key to perform MOK management”."),
                             qsTr("Choose “Enroll MOK”, then “Continue”, then “Yes”."),
-                            qsTr("Type the password below. Nothing shows while you type."),
+                            qsTr("Type the password below with the number keys. Nothing shows while you type."),
                             qsTr("Choose “Reboot”.")
                         ]
                         RowLayout {

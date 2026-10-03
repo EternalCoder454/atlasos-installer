@@ -15,11 +15,14 @@ InstallerPage {
 
     readonly property var disk: page.app.disk
     readonly property bool erase: page.app.mode === "erase"
+    // Erasing a disk with nothing found on it: no warning. It is still
+    // confirmed, since data lsblk can't recognise looks empty too.
+    readonly property bool losesData: page.erase && page.disk !== null && !page.disk.empty
     readonly property var layouts: JSON.parse(page.app.backend.layoutsJson)
 
     title: qsTr("Review")
     subtitle: qsTr("Check everything before AtlasOS is installed.")
-    primaryText: page.erase ? qsTr("Erase and Install") : qsTr("Install")
+    primaryText: page.losesData ? qsTr("Erase and Install") : qsTr("Install")
     primaryEnabled: page.disk !== null && page.app.mode.length > 0
     onPrimary: page.erase ? confirm.open() : page.app.startInstall()
     onBack: page.app.previous()
@@ -81,8 +84,8 @@ InstallerPage {
             Note {
                 Layout.fillWidth: true
                 visible: page.disk !== null
-                kind: page.erase ? "warning" : "info"
-                text: page.disk ? (page.erase ? page.disk.reviewErase + " " + qsTr("This can't be undone.") : page.disk.reviewFree) : ""
+                kind: page.losesData ? "warning" : "info"
+                text: !page.disk ? "" : !page.erase ? page.disk.reviewFree : page.losesData ? page.disk.reviewErase + " " + qsTr("This can't be undone.") : page.disk.reviewErase
             }
 
             Note {
@@ -102,7 +105,7 @@ InstallerPage {
             QQC2.Label {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
-                text: qsTr("Installing takes a few minutes and can't be stopped once it has started.")
+                text: qsTr("Installing takes a few minutes and can't be stopped once it has started. You'll create your account after the restart.")
                 wrapMode: Text.Wrap
                 opacity: 0.65
                 font: Kirigami.Theme.smallFont
@@ -112,9 +115,9 @@ InstallerPage {
 
     ConfirmDialog {
         id: confirm
-        title: page.disk ? qsTr("Erase %1?").arg(page.disk.title) : ""
-        text: page.disk ? page.disk.eraseText + " " + qsTr("This can't be undone.") : ""
-        acceptText: qsTr("Erase and Install")
+        title: !page.disk ? "" : page.losesData ? qsTr("Erase %1?").arg(page.disk.title) : qsTr("Use All of %1?").arg(page.disk.title)
+        text: !page.disk ? "" : page.losesData ? page.disk.eraseText + " " + qsTr("This can't be undone.") : qsTr("Nothing was found on this disk. If it does hold anything, it is erased.")
+        acceptText: page.losesData ? qsTr("Erase and Install") : qsTr("Install")
         focusReject: true
         onAccepted: page.app.startInstall()
     }

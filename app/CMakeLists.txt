@@ -39,7 +39,7 @@ qt_add_qml_module(atlas-installer-app
         qml/WelcomePage.qml qml/KeyboardPage.qml qml/WifiPage.qml qml/DiskPage.qml
         qml/ReviewPage.qml qml/ProgressPage.qml qml/RestartPage.qml
     RESOURCES
-        data/atlasos-logo.svg
+        data/atlasos-logo.svg data/check.svg
 )
 
 target_link_libraries(atlas-installer-app PRIVATE
