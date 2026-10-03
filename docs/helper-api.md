@@ -107,6 +107,11 @@ While Install runs:
 - the helper holds a logind block inhibitor for shutdown, sleep and idle
 - every other disk call returns `Busy`
 
+Install is refused with `Busy` once an install has finished (`Status` says
+`done`): a second one would lose the first result's MOK password, and the
+system is installed. A UI that gets `Busy` from Install follows `Status`.
+The final state is written before the busy flag is released.
+
 The install keeps going if the caller disconnects or crashes: it runs in a
 task of its own, and its state is kept (see `Status`). A UI that lost the
 call asks `Status` instead of reporting a failure.
@@ -136,6 +141,10 @@ helper stops:
 install (`net.eterneon.atlas.installer.install`) without asking: the check
 runs with no interaction. For anyone else it is `null`. The password is
 never logged.
+
+A `failed` state stays for a UI that reattaches, until the next
+`ListDisks` call (the user going back to choose a disk): that resets it to
+`idle`.
 
 A UI that starts, or whose `Install` call dropped, calls Status: `installing`
 goes to the Progress page and Status is asked every two seconds (the

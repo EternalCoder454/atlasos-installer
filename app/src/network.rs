@@ -453,6 +453,17 @@ fn wep_key(k: &str) -> bool {
         || matches!(k.len(), 10 | 26) && k.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// A network name is 1 to 32 bytes (not characters).
+pub fn check_ssid_len(name: &str) -> Result<(), String> {
+    match name.len() {
+        0 => Err("Type the network's name.".into()),
+        1..=32 => Ok(()),
+        n => Err(format!(
+            "A network name is at most 32 bytes long. This one is {n} bytes (accented letters and emoji count as more than one)."
+        )),
+    }
+}
+
 /// The security a hidden network is set up with, from the page's choice:
 /// "none", "wpa" (WPA and WPA2 Personal) or "sae" (WPA3 Personal). Anything
 /// else is guessed from the password, as before the choice existed.
@@ -525,6 +536,8 @@ pub async fn connect(
     // Listen to the adapter before starting, so the reason it gives for a
     // failure is not missed.
     let reason = watch_reason(&c, &dev).await;
+    // each attempt starts with no reason
+    *reason.reason.lock().unwrap_or_else(|e| e.into_inner()) = None;
     let (settings_path, active_path) = nm
         .add_and_activate_connection(
             settings(ssid, &name, &uuid, password, security, hidden.is_some()),
@@ -607,9 +620,13 @@ const REASON_NEW_ACTIVATION: u32 = 60;
 /// (we stopped waiting).
 fn failure_message(ssid: &str, security: Security, reason: Option<u32>) -> String {
     match reason {
-        Some(REASON_NO_SECRETS | REASON_SUPPLICANT_DISCONNECT) if security.needs_password() => {
+        Some(REASON_NO_SECRETS) if security.needs_password() => {
             format!("Couldn't connect to {ssid}. Check the password and try again.")
         }
+        // also what a deauthentication or a weak signal looks like
+        Some(REASON_SUPPLICANT_DISCONNECT) if security.needs_password() => format!(
+            "Couldn't connect to {ssid}. Check the password, and that the network is in range."
+        ),
         Some(REASON_SSID_NOT_FOUND) => {
             format!("Couldn't reach {ssid}. It may be out of range: move closer and try again.")
         }
@@ -734,6 +751,20 @@ mod tests {
     }
 
     #[test]
+    fn network_names_are_one_to_thirty_two_bytes() {
+        assert!(check_ssid_len("Home").is_ok());
+        assert!(check_ssid_len(&"a".repeat(32)).is_ok());
+        assert!(check_ssid_len("").is_err());
+        assert!(
+            check_ssid_len(&"a".repeat(33))
+                .unwrap_err()
+                .contains("33 bytes")
+        );
+        // 11 characters, 33 bytes
+        assert!(check_ssid_len(&"\u{20ac}".repeat(11)).is_err());
+    }
+
+    #[test]
     fn wep_keys() {
         assert!(wep_key("abcde") && wep_key("0123456789") && !wep_key("a passphrase"));
     }
@@ -826,6 +857,13 @@ mod tests {
         let pw = |r| failure_message("Home", psk, r).contains("password");
         assert!(pw(Some(REASON_NO_SECRETS)));
         assert!(pw(Some(REASON_SUPPLICANT_DISCONNECT)));
+        assert!(
+            failure_message("Home", psk, Some(REASON_SUPPLICANT_DISCONNECT)).contains("in range")
+        );
+        assert!(
+            !failure_message("Home", psk, Some(REASON_NO_SECRETS)).contains("in range"),
+            "only no-secrets is sure it is the password"
+        );
         for r in [
             None,
             Some(REASON_SUPPLICANT_TIMEOUT),

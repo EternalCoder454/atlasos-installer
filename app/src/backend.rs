@@ -350,7 +350,20 @@ impl qobject::Backend {
                 async {
                     let json = match &flags {
                         Some(f) => demo::status(f),
-                        None => helper::status().await?,
+                        // the helper may still be starting
+                        None => {
+                            let mut tries = 0;
+                            loop {
+                                match helper::status().await {
+                                    Ok(j) => break j,
+                                    Err(e) if tries >= 4 => return Err(e),
+                                    Err(_) => {
+                                        tries += 1;
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    }
+                                }
+                            }
+                        }
                     };
                     view::reattach(&json).map_err(helper_err)
                 },
@@ -387,6 +400,7 @@ impl qobject::Backend {
         match r {
             view::Reattach::Idle => {}
             view::Reattach::Running { fraction, text } => {
+                self.as_mut().set_install_began(true);
                 self.as_mut().set_install_error(QString::default());
                 self.as_mut().set_install_state(q("running"));
                 self.as_mut().on_progress(fraction, &text);
@@ -562,10 +576,16 @@ impl qobject::Backend {
             Some(b) if !hidden => b,
             _ => ssid.as_bytes().to_vec(),
         };
+        if hidden && let Err(m) = network::check_ssid_len(&ssid) {
+            self.as_mut().set_wifi_error(q(&m));
+            return;
+        }
         let hidden_security =
             hidden.then(|| network::hidden_security(&security.to_string(), &password));
         self.as_mut().set_wifi_error(QString::default());
-        self.as_mut().set_wifi_connecting(q(&ssid));
+        // what the list compares to: the SSID's bytes, not its lossy name
+        self.as_mut()
+            .set_wifi_connecting(q(&network::ssid_hex(&raw)));
         let flags = self.rust().flags.clone();
         let qt = self.qt_thread();
         rt().spawn(async move {
@@ -689,7 +709,9 @@ impl qobject::Backend {
                         }
                         // The call was lost, not refused: the install may
                         // be going on. Ask the helper until it says.
-                        Err(e) if e.transient => {
+                        // Busy: the helper is already installing (an
+                        // earlier run of this UI started it).
+                        Err(e) if e.transient || e.busy => {
                             let progress = move |fraction: f64, text: String| {
                                 let _ = qt_follow.queue(move |mut obj| {
                                     obj.as_mut().on_progress(fraction, &text)

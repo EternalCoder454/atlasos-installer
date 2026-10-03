@@ -107,7 +107,11 @@ fn map(e: zbus::Error) -> Error {
         zbus::Error::MethodError(name, msg, _) => describe(name.as_str(), msg.as_deref()),
         zbus::Error::FDO(fdo) => {
             let name = fdo_name(&fdo);
-            describe(&name, Some(&fdo.to_string()))
+            let e = describe(&name, Some(&fdo.to_string()));
+            if e.transient {
+                crate::backend::reset_system_bus();
+            }
+            e
         }
         // Input/output and the like: the connection itself broke.
         other => {

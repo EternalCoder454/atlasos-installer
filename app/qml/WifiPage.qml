@@ -16,7 +16,8 @@ InstallerPage {
     readonly property var wifi: page.app.wifi
     readonly property bool connected: page.app.wifiUuid.length > 0
     readonly property string connecting: page.app.backend.wifiConnecting
-    // The network whose password field is open; "\n" is "Other network".
+    // The ssidHex of the network whose password field is open; "\n" is
+    // "Other network". (The hex, not the name: names can look alike.)
     property string open: ""
     // The rows shown. Not updated while a password field is open: a new
     // model would rebuild the rows and lose what was typed.
@@ -46,7 +47,7 @@ InstallerPage {
 
     function describe(n) {
         if (n.active) return qsTr("Connected");
-        if (n.ssid === page.connecting) return qsTr("Connecting…");
+        if (n.ssidHex === page.connecting) return qsTr("Connecting…");
         switch (n.security) {
         case "open": return qsTr("Open network");
         case "owe": return qsTr("Open network, encrypted");
@@ -64,7 +65,7 @@ InstallerPage {
             page.open = "";
             page.app.backend.connectWifi(n.ssid, n.ssidHex, "", false, "");
         } else {
-            page.open = page.open === n.ssid ? "" : n.ssid;
+            page.open = page.open === n.ssidHex ? "" : n.ssidHex;
         }
     }
 
@@ -198,7 +199,7 @@ InstallerPage {
                 iconName: other ? "network-wireless-hidden-symbolic" : page.signalIcon(modelData.strength)
                 selected: !other && modelData.active
                 clickable: other || modelData.security !== "enterprise"
-                expanded: page.open === modelData.ssid
+                expanded: page.open === (netRow.other ? "\n" : netRow.modelData.ssidHex)
                 onClicked: {
                     if (other) {
                         page.app.backend.clearWifiError();

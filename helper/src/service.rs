@@ -283,6 +283,13 @@ impl Service {
     pub async fn do_list_disks(&self) -> Result<String, HelperError> {
         let guard = self.begin()?;
         self.refuse_if_busy()?;
+        // Going back to choose a disk: a failure nobody needs to see again
+        {
+            let mut st = lock(&self.status);
+            if st.state == "failed" {
+                *st = Status::idle();
+            }
+        }
         let disks = self.disks.clone().lock_owned().await;
         self.refuse_if_busy()?;
         let (runner, env) = (self.runner.clone(), self.env.clone());
@@ -313,6 +320,13 @@ impl Service {
     {
         let guard = self.begin()?;
         let busy = self.take_busy()?;
+        // A finished install is not run over: its result (with the MOK
+        // password) would be lost, and the system is installed.
+        if lock(&self.status).state == "done" {
+            return Err(HelperError::Busy(
+                "AtlasOS is already installed: restart the computer".into(),
+            ));
+        }
         // from here the helper must stay up: it holds the install's result
         self.activity.pin();
         *lock(&self.status) = Status {
@@ -324,8 +338,12 @@ impl Service {
         let inhibit = inhibit.await;
         let (runner, env) = (self.runner.clone(), self.env.clone());
         let status = self.status.clone();
+        let final_status = self.status.clone();
         let record = move |step: &str, fraction: f64, text: &str| {
             let mut st = lock(&status);
+            if st.state != "installing" {
+                return;
+            }
             st.step = step.into();
             st.fraction = fraction;
             st.text = text.into();
@@ -333,9 +351,36 @@ impl Service {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut work = tokio::task::spawn_blocking(move || {
             let _keep = (guard, busy, disks, inhibit);
-            install::install(runner.as_ref(), &env, &req, &mut |p| {
+            let result = install::install(runner.as_ref(), &env, &req, &mut |p| {
                 let _ = tx.send((p.stage.id(), p.fraction, p.text()));
-            })
+            });
+            // The final state is written while busy is still held, so no
+            // second install can start in between and be overwritten.
+            let outcome = result.map_err(HelperError::Failed).and_then(|o| {
+                let value =
+                    serde_json::to_value(&o).map_err(|e| HelperError::Failed(e.to_string()))?;
+                let json =
+                    serde_json::to_string(&o).map_err(|e| HelperError::Failed(e.to_string()))?;
+                Ok((json, value))
+            });
+            let mut st = lock(&final_status);
+            match &outcome {
+                Ok((_, value)) => {
+                    st.state = "done";
+                    st.fraction = 1.0;
+                    st.result = Some(value.clone());
+                    st.error = None;
+                }
+                Err(e) => {
+                    st.state = "failed";
+                    st.error = Some(match e {
+                        HelperError::Failed(m) => m.clone(),
+                        other => format!("{other:?}"),
+                    });
+                }
+            }
+            drop(st);
+            outcome.map(|(json, _)| json)
         });
         let result = loop {
             tokio::select! {
@@ -350,32 +395,15 @@ impl Service {
             record(step, fraction, text);
             progress(step, fraction, text);
         }
-        let outcome = result
-            .map_err(|e| HelperError::Failed(format!("worker failed: {e}")))
-            .and_then(|r| r.map_err(HelperError::Failed))
-            .and_then(|o| {
-                let value =
-                    serde_json::to_value(&o).map_err(|e| HelperError::Failed(e.to_string()))?;
-                let json =
-                    serde_json::to_string(&o).map_err(|e| HelperError::Failed(e.to_string()))?;
-                Ok((json, value))
-            });
-        let mut st = lock(&self.status);
-        match outcome {
-            Ok((json, value)) => {
-                st.state = "done";
-                st.fraction = 1.0;
-                st.result = Some(value);
-                st.error = None;
-                Ok(json)
-            }
+        match result {
+            Ok(r) => r,
             Err(e) => {
+                // the worker panicked: its guards are gone, say so
+                let m = format!("worker failed: {e}");
+                let mut st = lock(&self.status);
                 st.state = "failed";
-                st.error = Some(match &e {
-                    HelperError::Failed(m) => m.clone(),
-                    other => format!("{other:?}"),
-                });
-                Err(e)
+                st.error = Some(m.clone());
+                Err(HelperError::Failed(m))
             }
         }
     }
@@ -645,6 +673,65 @@ mod tests {
                 .await
                 .is_err()
         );
+        assert_eq!(status_of(&s, true)["state"], "failed");
+    }
+
+    #[tokio::test]
+    async fn a_failure_stays_until_the_disks_are_listed_again() {
+        let s = Service::new(Arc::new(Nothing), Env::system());
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        assert!(
+            s.do_install(req, async { None }, |_, _, _| {})
+                .await
+                .is_err()
+        );
+        assert_eq!(status_of(&s, true)["state"], "failed");
+        assert_eq!(status_of(&s, true)["state"], "failed", "a reattach sees it");
+        let _ = s.do_list_disks().await;
+        assert_eq!(status_of(&s, true)["state"], "idle");
+    }
+
+    #[tokio::test]
+    async fn a_finished_install_is_not_run_over() {
+        let s = Service::new(Arc::new(Nothing), Env::system());
+        *lock(&s.status) = Status {
+            state: "done",
+            result: Some(serde_json::json!({"mok_password": "12345678"})),
+            ..Status::idle()
+        };
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let r = s.do_install(req, async { None }, |_, _, _| {}).await;
+        assert!(matches!(r, Err(HelperError::Busy(_))), "{r:?}");
+        assert!(!s.busy.load(Ordering::Acquire));
+        assert_eq!(status_of(&s, true)["result"]["mok_password"], "12345678");
+        // listing does not clear a done state
+        let _ = s.do_list_disks().await;
+        assert_eq!(status_of(&s, true)["state"], "done");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn status_is_final_before_busy_is_released() {
+        let s = Arc::new(Service::new(Arc::new(Slow), Env::system()));
+        let watcher = {
+            let s = s.clone();
+            tokio::spawn(async move {
+                let mut bad = false;
+                for _ in 0..1000 {
+                    // read status first: busy can only go false after it
+                    // has been written
+                    let state = lock(&s.status).state;
+                    let busy = s.busy.load(Ordering::Acquire);
+                    if !busy && state == "installing" {
+                        bad = true;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                bad
+            })
+        };
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let _ = s.do_install(req, async { None }, |_, _, _| {}).await;
+        assert!(!watcher.await.unwrap(), "busy released while installing");
         assert_eq!(status_of(&s, true)["state"], "failed");
     }
 
