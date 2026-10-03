@@ -1,0 +1,10 @@
+# The installer's dev container (app/Containerfile.dev) with some packages at
+# exact Fedora builds: those of an AtlasOS image, so the installer built in it
+# runs on that image's live ISO. iso/make-iso.sh builds it when they differ.
+#
+#   podman build --build-arg PINS="qt6-qtbase-6.11.0-2.fc44 ..." \
+#     -f iso/Containerfile.pin iso
+FROM localhost/atlas-installer-dev
+ARG PINS
+COPY pin-builds.sh /usr/local/bin/
+RUN pin-builds.sh ${PINS} && dnf clean all

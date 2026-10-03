@@ -102,8 +102,36 @@ else
 	}
 fi
 
+# The installer must be built against the image's own Qt, Kirigami and glibc
+# builds (live/build.sh checks). The dev container has Fedora's newest, which
+# differ whenever Fedora updated one of them after the image was built, or
+# the container is older than the image. Then a copy of the dev container
+# pinned to the image's builds (iso/pin-builds.sh) builds it instead.
+# One line per build, so a multilib (i686) copy of one doesn't count twice.
+query=(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' qt6-qtbase qt6-qtdeclarative kf6-kirigami glibc)
+builds() { sort -u | tr '\n' ' '; }
+want=$(podman run --rm --pull=never --entrypoint rpm "$base" "${query[@]:1}" | builds)
+have=$(app/dev.sh "${query[@]}" | builds)
+dev=
+if [ "$have" != "$want" ]; then
+	echo ">> Pinning the build container to the image's builds: $want"
+	# Named by the builds and the dev container it starts from, so a rebuilt
+	# dev container gets a new copy.
+	from=$(podman image inspect --format '{{.Id}}' localhost/atlas-installer-dev)
+	dev=localhost/atlas-installer-dev:pinned-$(echo "$from $want" | sha256sum | cut -c1-12)
+	podman image exists "$dev" ||
+		podman build -q -t "$dev" --build-arg PINS="$want" \
+			-f iso/Containerfile.pin iso >/dev/null
+	# dnf --allowerasing may have removed something rather than pin it.
+	have=$(ATLAS_DEV_IMAGE=$dev app/dev.sh "${query[@]}" | builds)
+	[ "$have" = "$want" ] || {
+		echo "The pinned build container has $have, not $want." >&2
+		exit 1
+	}
+fi
+
 echo ">> Building the installer"
-app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {
+ATLAS_DEV_IMAGE=$dev app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {
 	tail -30 build/stage-installer.log >&2
 	exit 1
 }

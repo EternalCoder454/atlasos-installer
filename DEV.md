@@ -60,8 +60,11 @@ display, and `ATLAS=1` for the AtlasOS colours and font.
 `iso/make-iso.sh` builds the UI and helper in the dev container
 (`live/stage-installer.sh`). `live/build.sh` then installs them into the live
 image, and refuses if the image's Qt, Kirigami or glibc differ from the
-container's. In that case, rebuild the container with
-`podman rmi localhost/atlas-installer-dev`.
+container's. They differ whenever Fedora updates one of them after the image
+was built, so `make-iso.sh` then builds in a copy of the dev container pinned
+to the image's exact builds (`iso/Containerfile.pin`). `iso/pin-builds.sh`
+fetches those from Koji, which keeps every build, and installs them only if
+they carry Fedora's signature.
 
 In the live image, plasmalogin logs the `atlas-installer` user into a Plasma
 session with no panel or screen lock. The session runs

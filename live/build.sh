@@ -23,7 +23,7 @@ DRACUT_NO_XATTR=1 dracut --force --no-hostonly --zstd --reproducible \
 while read -r name built; do
 	have=$(rpm -q --qf '%{VERSION}' "$name")
 	[ "$have" = "$built" ] || {
-		echo "build.sh: the installer was built with $name $built, but the image has $have; rebuild the dev container (podman rmi localhost/atlas-installer-dev)" >&2
+		echo "build.sh: the installer was built with $name $built, but the image has $have; iso/make-iso.sh should have pinned its build container to the image's builds" >&2
 		exit 1
 	}
 done </src/installer/built-with

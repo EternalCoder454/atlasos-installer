@@ -8,8 +8,11 @@
 # the app can only run in demo mode there (ATLAS_INSTALLER_DEMO).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-image=localhost/atlas-installer-dev
+# ATLAS_DEV_IMAGE names another image to run in: iso/make-iso.sh uses one
+# pinned to the Qt, Kirigami and glibc of the image it builds an ISO of.
+image=${ATLAS_DEV_IMAGE:-localhost/atlas-installer-dev}
 if ! podman image exists "$image"; then
+	[ -z "${ATLAS_DEV_IMAGE:-}" ] || { echo "dev.sh: no image $image" >&2; exit 1; }
 	podman build -q -t "$image" -f app/Containerfile.dev app >/dev/null
 fi
 if [ $# -eq 0 ]; then

@@ -99,8 +99,9 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   helper in the dev container (`live/stage-installer.sh`, staged in
   `build/live-installer/`), and `live/build.sh` installs them into the live
   image. It refuses if the image's Qt, Kirigami or glibc version differs from the
-  dev container's. In that case, rebuild the container with
-  `podman rmi localhost/atlas-installer-dev`.
+  build container's. So when the dev container's builds differ from the
+  image's, make-iso.sh builds in a copy pinned to the image's builds
+  (`iso/Containerfile.pin`, `iso/pin-builds.sh`, signed RPMs from Koji).
   - plasmalogin logs the `atlas-installer` user (from sysusers, with its
     home in `/run/atlas-installer-session`) into a Plasma session. It has
     no panel and no screen lock, and allows only plasma-setup's shortcuts.
