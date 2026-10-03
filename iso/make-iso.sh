@@ -9,7 +9,7 @@
 set -euo pipefail
 
 name=${1:-atlasos}
-tag=${2:-latest}
+tag=${2:-stable}
 repo=ghcr.io/eternalcoder454/$name
 case $name in
 atlasos) label=ATLASOS ;;

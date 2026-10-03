@@ -12,7 +12,7 @@
 set -euo pipefail
 
 disk=$1
-src=ghcr.io/eternalcoder454/atlasos:latest
+src=ghcr.io/eternalcoder454/atlasos:stable
 target=/run/atlas-target
 state=/run/atlas-s3
 esp_type=c12a7328-f81f-11d2-ba4b-00a0c93ec93b

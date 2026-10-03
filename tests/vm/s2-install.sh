@@ -10,7 +10,7 @@ set -euxo pipefail
 
 disk=$1
 how=$2
-src=ghcr.io/eternalcoder454/atlasos:latest
+src=ghcr.io/eternalcoder454/atlasos:stable
 target=/run/atlas-target
 
 case $disk in *nvme* | *mmcblk*) p=p ;; *) p= ;; esac
