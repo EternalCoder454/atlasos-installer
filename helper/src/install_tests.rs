@@ -189,7 +189,13 @@ impl Runner for Fake {
             } else {
                 "x is not enrolled\n"
             }),
-            ("mokutil", [a]) if a.starts_with("--generate-hash=") => ok("$6$salt$hash\n"),
+            ("mokutil", ["--generate-hash"]) => {
+                /* As the real one does with the password on stdin. */
+                let pw = cmd.stdin.as_deref().unwrap_or_default();
+                let mut twice = pw.lines();
+                assert_eq!(twice.next(), twice.next(), "the password, twice");
+                ok("input password: \ninput password again: \n$6$salt$hash\n")
+            }
             _ => ok(""),
         }
     }
@@ -622,6 +628,19 @@ fn mok_passwords_are_eight_digits() {
         assert!(p.len() == 8 && p.bytes().all(|b| b.is_ascii_digit()));
     }
     assert_ne!(mok_password().unwrap(), mok_password().unwrap());
+}
+
+#[test]
+fn mok_hash_is_the_last_line() {
+    // mokutil 0.7.2 with the password on stdin, as seen in the live session.
+    let out = "input password: \ninput password again: \n$6$7NHcM/2BNnGR$x2o0NVAg\n";
+    assert_eq!(mok_hash(out), Some("$6$7NHcM/2BNnGR$x2o0NVAg"));
+    assert_eq!(mok_hash("$6$a$b"), Some("$6$a$b"));
+    assert_eq!(
+        mok_hash("input password: \npassword doesn't match\nAbort\n"),
+        None
+    );
+    assert_eq!(mok_hash(""), None);
 }
 
 fn fingerprint_of(w: &World, disk: &str) -> String {

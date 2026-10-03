@@ -641,13 +641,28 @@ fn mok_password() -> Result<String, String> {
     Ok(out)
 }
 
+/// The crypt hash from `mokutil --generate-hash`: its last line. With the
+/// password on stdin it first prints its two prompts on stdout.
+fn mok_hash(stdout: &str) -> Option<&str> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .filter(|l| l.starts_with('$'))
+}
+
 fn queue_mok(r: &dyn Runner, env: &Env) -> Result<String, String> {
     let pw = mok_password()?;
-    let hash = run(
+    /* On stdin, twice as mokutil asks for it, so the password never shows
+    in the process list. */
+    let out = run(
         r,
-        Cmd::new(bin::MOKUTIL, [format!("--generate-hash={pw}")]).secret(),
+        Cmd::new(bin::MOKUTIL, ["--generate-hash"])
+            .stdin(format!("{pw}\n{pw}\n"))
+            .secret(),
     )?;
-    write_file(&env.run_dir, "mok.hash", hash.stdout.trim(), 0o600)?;
+    let hash = mok_hash(&out.stdout).ok_or("mokutil gave no password hash")?;
+    write_file(&env.run_dir, "mok.hash", hash, 0o600)?;
     let hash_file = env.run_dir.join("mok.hash");
     let key = env.host(NVIDIA_KEY);
     let result = run(

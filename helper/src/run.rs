@@ -47,7 +47,8 @@ pub struct Cmd {
     pub args: Vec<String>,
     pub stdin: Option<String>,
     pub timeout: Duration,
-    /// The arguments hold a secret: they are not logged.
+    /// The arguments or stdin hold a secret: the arguments are not logged
+    /// (stdin never is).
     pub secret: bool,
     /// Cleanup (unmounting) that still runs while the helper shuts down.
     pub cleanup: bool,
