@@ -18,7 +18,9 @@ InstallerPage {
     readonly property string mok: page.result.mokPassword || ""
 
     title: qsTr("AtlasOS is installed")
-    subtitle: qsTr("Remove the USB stick, then restart.")
+    subtitle: page.result.bootMedia === "cd" ? qsTr("Take out the disc, then restart.")
+            : page.result.bootMedia === "usb" ? qsTr("Remove the USB stick, then restart.")
+            : qsTr("Remove the USB stick or disc you started from, then restart.")
     backVisible: false
     primaryText: page.backend.rebooting ? qsTr("Restarting…") : qsTr("Restart")
     primaryEnabled: !page.backend.rebooting

@@ -1,0 +1,13 @@
+// The live session's user installs, and sets up Wi-Fi, without a password.
+// Whoever is at the keyboard booted the ISO and owns the computer; an
+// installed system has no such user.
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "atlas-installer" || !subject.local || !subject.active) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (action.id.indexOf("net.eterneon.atlas.installer.") === 0 ||
+        action.id.indexOf("org.freedesktop.NetworkManager.") === 0) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

@@ -55,6 +55,9 @@ pub struct Disk {
     pub path: String,
     /// Model from udev, e.g. "Samsung SSD 990 PRO".
     pub name: String,
+    /// Serial number, to tell two disks of the same model apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
     pub size: u64,
     pub usb: bool,
     pub removable: bool,
@@ -143,15 +146,20 @@ fn is_ventoy(d: &Device) -> bool {
             .any(|l| l == "Ventoy" || l == "VTOYEFI")
 }
 
+/// The device, or something on it, is the live system's boot media.
+fn holds_live_source(d: &Device, live_sources: &[String]) -> bool {
+    d.walk().iter().any(|x| {
+        live_sources
+            .iter()
+            .any(|src| x.name == *src || x.kname.as_deref() == Some(src))
+    })
+}
+
 /// Why a top-level device is never offered, or `None` if it may be.
 /// The helper asks this again before installing, whatever the UI sent.
 pub fn hidden_reason(d: &Device, live_sources: &[String]) -> Option<&'static str> {
     let all = d.walk();
-    if all.iter().any(|x| {
-        live_sources
-            .iter()
-            .any(|src| x.name == *src || x.kname.as_deref() == Some(src))
-    }) {
+    if holds_live_source(d, live_sources) {
         return Some("the installer's boot media");
     }
     if all.iter().any(|x| has_iso_label(x)) {
@@ -255,6 +263,23 @@ fn friendly_name(d: &Device) -> String {
     }
 }
 
+/// What the installer was started from, for the Restart page: "cd", "usb",
+/// or "" when it isn't one of those or wasn't found.
+pub fn boot_media(probe: &Probe) -> &'static str {
+    let Some(lsblk) = &probe.lsblk else {
+        return "";
+    };
+    let media = lsblk
+        .blockdevices
+        .iter()
+        .find(|d| holds_live_source(d, &probe.live_sources));
+    match media {
+        Some(d) if d.kind == "rom" => "cd",
+        Some(d) if d.tran() == Some("usb") => "usb",
+        _ => "",
+    }
+}
+
 /// The plan for `mode` on `disk`, or why it isn't possible. Used both for
 /// listing and, after a fresh probe, by `Install`.
 pub fn plan_for(disk: &Device, probe: &Probe, mode: Mode) -> Result<Plan, Unavailable> {
@@ -318,6 +343,7 @@ pub fn list(probe: &Probe) -> DiskList {
             fingerprint: fingerprint(d, probe.tables.get(&d.name)),
             path: d.name.clone(),
             name: friendly_name(d),
+            serial: d.serial().map(String::from),
             size: d.size,
             usb: d.tran() == Some("usb"),
             removable: d.rm || d.hotplug,
@@ -541,6 +567,20 @@ mod tests {
         let d = &l.disks[0];
         assert!(d.free_space.possible, "67 GiB is enough for a new ESP too");
         assert_eq!(d.free_space.shared_esp, None);
+    }
+
+    #[test]
+    fn boot_media_says_cd_or_usb() {
+        assert_eq!(boot_media(&win_probe(63 * MIB)), "cd");
+        let ventoy = |src: &str| Probe {
+            lsblk: Some(Lsblk::parse(VENTOY).unwrap()),
+            live_sources: vec![src.into()],
+            ..Default::default()
+        };
+        assert_eq!(boot_media(&ventoy("/dev/mapper/ventoy")), "usb");
+        assert_eq!(boot_media(&ventoy("/dev/nvme0n1")), "", "an internal disk");
+        assert_eq!(boot_media(&ventoy("/dev/nope")), "");
+        assert_eq!(boot_media(&Probe::default()), "");
     }
 
     #[test]

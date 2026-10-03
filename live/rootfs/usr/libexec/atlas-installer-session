@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs the installer full-screen for the live session, and starts it again if
+# it is closed: there is nothing else in the session to go back to. Quick
+# exits in a row wait longer each time (up to 30 s), so a crash on start
+# doesn't spin.
+wait=1
+while :; do
+	start=$(date +%s)
+	/usr/bin/atlas-installer --fullscreen
+	if [ $(($(date +%s) - start)) -lt 10 ]; then
+		wait=$((wait * 2 > 30 ? 30 : wait * 2))
+		echo "atlas-installer-session: the installer exited at once; starting it again in $wait s" >&2
+	else
+		wait=1
+	fi
+	sleep "$wait"
+done

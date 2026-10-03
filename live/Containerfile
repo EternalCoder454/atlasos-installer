@@ -2,14 +2,17 @@
 # boot needs. It is never installed: the installer copies the published image
 # underneath it (embedded by iso/build-iso.sh), not this one.
 #
+#   app/dev.sh live/stage-installer.sh
 #   podman build --build-arg BASE_IMAGE=ghcr.io/eternalcoder454/atlasos@sha256:... \
 #     -f live/Containerfile -t localhost/atlasos-live .
 
 ARG BASE_IMAGE
 
-# The build script and files, bound into the build rather than copied in.
+# The build script and files, bound into the build rather than copied in,
+# and the installer staged by live/stage-installer.sh.
 FROM scratch AS ctx
 COPY live /
+COPY build/live-installer /installer
 
 FROM ${BASE_IMAGE}
 

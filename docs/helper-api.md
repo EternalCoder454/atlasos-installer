@@ -30,6 +30,7 @@ Returns JSON with `disks` and `hidden`. Each disk has these fields:
 | `fingerprint` | 16 hex digits. Pass it to Install. |
 | `path` | Device path. |
 | `name` | Model name. |
+| `serial` | Serial number, when the disk has one. Left out otherwise. |
 | `size` | Size in bytes. |
 | `usb` | USB disk: show a badge. |
 | `removable` | Removable or hotplug disk. |
@@ -85,8 +86,13 @@ Install returns this JSON:
 
 ```json
 {"mok_password": "12345678" | null, "windows_entry": true,
+ "boot_media": "cd" | "usb" | "",
  "warnings": ["..."], "log": "/run/atlas-installer/install.log"}
 ```
+
+`boot_media` is what the installer was started from, so the UI can say
+what to remove before restarting: an optical drive, a USB disk, or neither
+(an internal disk, or not found).
 
 `warnings` covers things that went wrong without failing the install: the
 firmware entry could not be renamed, an SELinux label was not set, the NVIDIA

@@ -59,7 +59,13 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   after the feature has been built and tested in a VM.
 - `tests/vm/vm.py` manages the `atlasinst-*` VMs in `qemu:///system`.
   Leave every other VM alone, including the user's `atlasos-daily`.
-- The ISO is `build/atlasos.iso`, built by `iso/make-iso.sh`.
+- The ISO is `build/atlasos.iso`, built by `iso/make-iso.sh` from the
+  published `:stable` (`--local` for this machine's `localhost/atlasos:latest`).
+  AtlasOS's `just iso` and `just iso-local` run it with `-o` into AtlasOS's
+  own `build/`.
+- The test matrix (which VMs, what to check) is in `DEV.md`. VMs have no
+  Wi-Fi: `tests/vm/wifi-ap.sh <vm> [ssh]` adds mac80211_hwsim radios and a
+  test access point.
 - To use the Windows base image, create a qcow2 overlay named
   `build/vm/atlasinst-<vm>-*.qcow2`, which `vm.py destroy` removes.
   Never write to `win11-base.qcow2` itself.
@@ -89,22 +95,28 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   Set `SCALE=1.5` to match the user's desktop, and `ATLAS=1` for the
   AtlasOS colours and IBM Plex Sans (copies of the schemes are in
   `app/tools/schemes/`).
-- **In a VM**, the UI runs in the live Plasma session:
-  - Push the helper with `vm.py push`, and copy `build/app/atlas-installer`
-    to `/usr/bin/`.
-  - Add a user `live` (in wheel) with autologin in
-    `/etc/plasmalogin.conf.d/autologin.conf`:
-    `[Autologin]`, `User=live`, `Session=plasma`, `Relogin=true`.
-  - Add a test polkit rule in `/etc/polkit-1/rules.d/` that allows `live`
-    the `net.eterneon.atlas.installer.*` and
-    `org.freedesktop.NetworkManager.*` actions. Make it mode 644:
-    `vm.py exec` creates files 0600, and polkitd ignores what it can't read.
-    The live ISO needs the same rule for real (Phase 3).
-  - Start the app with
-    `systemd-run --machine=live@ --user --unit=atlasinst-ui /usr/bin/atlas-installer`.
+- **The live session** (`live/`): `iso/make-iso.sh` builds the UI and
+  helper in the dev container (`live/stage-installer.sh`, staged in
+  `build/live-installer/`), and `live/build.sh` installs them into the live
+  image. It refuses if the image's Qt, Kirigami or glibc version differs from the
+  dev container's. In that case, rebuild the container with
+  `podman rmi localhost/atlas-installer-dev`.
+  - plasmalogin logs the `atlas-installer` user (from sysusers, with its
+    home in `/run/atlas-installer-session`) into a Plasma session. It has
+    no panel and no screen lock, and allows only plasma-setup's shortcuts.
+  - The session autostarts `/usr/libexec/atlas-installer-session`. It runs
+    the installer with `--fullscreen` and starts it again if it closes.
+  - The polkit rule `50-atlas-installer-session.rules` allows that user the
+    installer and NetworkManager actions without a password.
+- **In a VM**, boot the ISO and the installer comes up by itself:
+  - To try a new build without rebuilding the ISO, push the helper with
+    `vm.py push` and copy `build/app/atlas-installer` to `/usr/bin/`. Then
+    `pkill -f '^/usr/bin/atlas-installer'`, and the session restarts it.
   - Click with `tests/vm/click.sh <vm> X Y`, type with `virsh send-key`,
-    and look with `vm.py shot`. If the screen locks, use
-    `loginctl unlock-session`.
+    and look with `vm.py shot`.
+  - Shut the live session down cleanly (the UI's Restart, or `systemctl
+    reboot`), not with `virsh destroy`: files `test-access.sh` writes to
+    the target can be lost otherwise.
 - **Keyboard:** KWin 6.7 reloads the layout only on KConfig's change
   notice (`org.kde.kconfig.notify` `ConfigChanged` on path `/kxkbrc`).
   The old `org.kde.keyboard` `reloadConfig` signal does nothing.

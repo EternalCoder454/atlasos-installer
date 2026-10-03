@@ -134,6 +134,9 @@ pub struct Outcome {
     pub mok_password: Option<String>,
     /// Windows was added to the boot menu.
     pub windows_entry: bool,
+    /// What the installer was started from: "cd", "usb" or "", for
+    /// "Remove the USB stick" (see [`disks::boot_media`]).
+    pub boot_media: String,
     /// Things that went wrong without failing the install.
     pub warnings: Vec<String>,
     pub log: String,
@@ -260,6 +263,8 @@ pub struct Prepared {
     /// The Wi-Fi keyfile to copy: file name and contents.
     pub wifi: Option<(String, String)>,
     pub console_keymap: String,
+    /// See [`Outcome::boot_media`].
+    pub boot_media: &'static str,
 }
 
 fn secure_boot_on(env: &Env) -> bool {
@@ -350,6 +355,7 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
         windows_esps,
         mok,
         wifi,
+        boot_media: disks::boot_media(&probe),
     })
 }
 
@@ -913,6 +919,7 @@ fn execute(
     Ok(Outcome {
         mok_password,
         windows_entry: !p.windows_esps.is_empty(),
+        boot_media: p.boot_media.into(),
         warnings,
         log: env.log_path().display().to_string(),
     })

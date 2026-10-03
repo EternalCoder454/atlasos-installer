@@ -366,6 +366,7 @@ fn free_space_beside_windows() {
         Outcome {
             mok_password: None,
             windows_entry: true,
+            boot_media: "cd".into(),
             warnings: vec![],
             log: w.env.log_path().display().to_string(),
         }

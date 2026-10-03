@@ -54,10 +54,41 @@ pub struct DiskRow {
 }
 
 pub fn disk_rows(list: &DiskList) -> Vec<DiskRow> {
-    list.disks.iter().map(disk_row).collect()
+    list.disks
+        .iter()
+        .map(|d| disk_row(d, &disk_name(d, &list.disks)))
+        .collect()
 }
 
-fn disk_row(d: &Disk) -> DiskRow {
+/// The disk's name, made unique when another disk has the same name and
+/// size: "Samsung SSD 990 PRO, serial …4F2A" if the serials end
+/// differently, else "Virtual disk, /dev/vdb".
+fn disk_name(d: &Disk, all: &[Disk]) -> String {
+    let twins: Vec<&Disk> = all
+        .iter()
+        .filter(|o| o.name == d.name && size(o.size) == size(d.size))
+        .collect();
+    if twins.len() < 2 {
+        return d.name.clone();
+    }
+    let tail = |x: &Disk| -> Option<String> {
+        let s = x.serial.as_deref()?;
+        let n = s.chars().count();
+        Some(s.chars().skip(n.saturating_sub(4)).collect())
+    };
+    let tails: Vec<_> = twins.iter().map(|x| tail(x)).collect();
+    let distinct = tails.iter().all(Option::is_some)
+        && tails
+            .iter()
+            .enumerate()
+            .all(|(i, t)| !tails[..i].contains(t));
+    match tail(d) {
+        Some(t) if distinct => format!("{}, serial …{t}", d.name),
+        _ => format!("{}, {}", d.name, d.path),
+    }
+}
+
+fn disk_row(d: &Disk, name: &str) -> DiskRow {
     let size = size(d.size);
     let what = if d.contents.is_empty() {
         "Empty".to_string()
@@ -115,17 +146,17 @@ fn disk_row(d: &Disk) -> DiskRow {
         String::new()
     };
     let review_erase = if d.contents.is_empty() {
-        format!("{} ({size}) is empty. AtlasOS uses all of it.", d.name)
+        format!("{name} ({size}) is empty. AtlasOS uses all of it.")
     } else {
         format!(
-            "{} ({size}) is erased: {} and all files on it are lost.",
-            d.name, d.description
+            "{name} ({size}) is erased: {} and all files on it are lost.",
+            d.description
         )
     };
     DiskRow {
         id: d.id.clone(),
         fingerprint: d.fingerprint.clone(),
-        title: d.name.clone(),
+        title: name.to_string(),
         subtitle: format!("{size} · {what}"),
         icon,
         usb: d.usb,
@@ -141,9 +172,8 @@ fn disk_row(d: &Disk) -> DiskRow {
         note,
         review_erase,
         review_free: format!(
-            "AtlasOS goes in {} of free space on {} ({size}). {keeps}",
+            "AtlasOS goes in {} of free space on {name} ({size}). {keeps}",
             size_of_free(d.free_space.bytes),
-            d.name
         ),
     }
 }
@@ -173,6 +203,8 @@ pub struct Done {
     /// The MOK Manager password, or "" when the key wasn't queued.
     pub mok_password: String,
     pub windows_entry: bool,
+    /// What to remove before restarting: "cd", "usb" or "".
+    pub boot_media: String,
     pub warnings: Vec<String>,
     pub log: String,
 }
@@ -182,6 +214,8 @@ pub struct Done {
 struct Outcome {
     mok_password: Option<String>,
     windows_entry: bool,
+    #[serde(default)]
+    boot_media: String,
     #[serde(default)]
     warnings: Vec<String>,
     #[serde(default)]
@@ -194,6 +228,7 @@ pub fn done_from_outcome(json: &str) -> Result<Done, String> {
     Ok(Done {
         mok_password: o.mok_password.unwrap_or_default(),
         windows_entry: o.windows_entry,
+        boot_media: o.boot_media,
         warnings: o.warnings,
         log: o.log,
     })
@@ -272,16 +307,46 @@ mod tests {
     #[test]
     fn outcome() {
         let d = done_from_outcome(
-            r#"{"mok_password":"12345678","windows_entry":true,"warnings":["w"],"log":"/run/atlas-installer/install.log"}"#,
+            r#"{"mok_password":"12345678","windows_entry":true,"boot_media":"usb","warnings":["w"],"log":"/run/atlas-installer/install.log"}"#,
         )
         .unwrap();
         assert_eq!(d.mok_password, "12345678");
         assert!(d.windows_entry);
+        assert_eq!(d.boot_media, "usb");
         let d = done_from_outcome(
             r#"{"mok_password":null,"windows_entry":false,"warnings":[],"log":""}"#,
         )
         .unwrap();
         assert_eq!(d.mok_password, "");
+        assert_eq!(d.boot_media, "", "an older helper doesn't say");
         assert!(done_from_outcome("{}").is_err());
+    }
+
+    #[test]
+    fn identical_disks_are_told_apart() {
+        let mut list = fixture();
+        let empty = list.disks[1].clone();
+        let mut twin = empty.clone();
+        twin.id = "sdz".into();
+        twin.path = "/dev/sdz".into();
+        list.disks.push(twin);
+        let titles =
+            |l: &DiskList| -> Vec<String> { disk_rows(l).into_iter().map(|r| r.title).collect() };
+        let plain = titles(&fixture());
+        let t = titles(&list);
+        assert_eq!(t[0], plain[0], "others keep their names");
+        assert_eq!(t[1], format!("{}, {}", empty.name, empty.path));
+        assert_eq!(t[4], format!("{}, /dev/sdz", empty.name));
+        assert!(disk_rows(&list)[4].review_erase.starts_with(&t[4]));
+
+        list.disks[1].serial = Some("S6Z1NF0W104F2A".into());
+        list.disks[4].serial = Some("S6Z1NF0W1087B3".into());
+        let t = titles(&list);
+        assert_eq!(t[1], format!("{}, serial …4F2A", empty.name));
+        assert_eq!(t[4], format!("{}, serial …87B3", empty.name));
+
+        // same last four: the path, which always differs
+        list.disks[4].serial = Some("XX4F2A".into());
+        assert_eq!(titles(&list)[4], format!("{}, /dev/sdz", empty.name));
     }
 }

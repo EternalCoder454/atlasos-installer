@@ -122,16 +122,19 @@ def exec_(a: argparse.Namespace) -> None:
 
 def push(a: argparse.Namespace) -> None:
     """Through the guest agent, in chunks that keep each virsh argument under
-    Linux's 128 KiB limit for one argv string."""
+    Linux's 128 KiB limit for one argv string. Written beside the target and
+    renamed over it, so a running binary can be replaced (no "text file
+    busy")."""
     dom = domain(a.name)
     data = pathlib.Path(a.local).read_bytes()
-    h = agent(dom, "guest-file-open", path=a.guest, mode="w")
+    tmp = f"{a.guest}.push"
+    h = agent(dom, "guest-file-open", path=tmp, mode="w")
     try:
         for i in range(0, len(data), 64 * 1024):
             agent(dom, "guest-file-write", handle=h, **{"buf-b64": base64.b64encode(data[i:i + 64 * 1024]).decode()})
     finally:
         agent(dom, "guest-file-close", handle=h)
-    code, out, err = run(dom, f"chmod {a.mode} '{a.guest}' && sha256sum '{a.guest}'", 30)
+    code, out, err = run(dom, f"chmod {a.mode} '{tmp}' && mv -f '{tmp}' '{a.guest}' && sha256sum '{a.guest}'", 30)
     want = hashlib.sha256(data).hexdigest()
     if code != 0 or not out.startswith(want):
         sys.exit(f"push failed: {out}{err}")

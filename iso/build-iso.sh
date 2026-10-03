@@ -3,12 +3,12 @@
 # (iso/Containerfile.builder), started by iso/make-iso.sh, with:
 #
 #   /rootfs        the live image (live/Containerfile), mounted read-only
-#   /payload-oci   the published image to install, as an OCI layout holding
-#                  the registry's exact blobs (so its digests match ghcr.io)
+#   /payload-oci   the image to install, as an OCI layout (for a published
+#                  image, the registry's exact blobs, so its digests match ghcr.io)
 #   /out           where the ISO is written
 #
 # and the environment: ISO_LABEL, ISO_NAME, PAYLOAD_REF (the image name the
-# embedded copy is stored under, e.g. ghcr.io/eternalcoder454/atlasos:latest).
+# embedded copy is stored under, e.g. ghcr.io/eternalcoder454/atlasos:stable).
 #
 # Adapted from Universal Blue's titanoboa build_iso.sh (Apache-2.0,
 # https://github.com/ublue-os/titanoboa).
@@ -32,6 +32,9 @@ embed() {
 }
 embed || {
 	echo ">> Embedding failed; trying once more from an empty store"
+	# A failed copy can leave layers mounted, deepest last in the list.
+	awk -v p="$work/payload" 'index($2, p) == 1 { print $2 }' /proc/mounts |
+		sort -r | xargs -r umount -l
 	rm -rf "$work/payload" "$work/payload-run"
 	embed
 }

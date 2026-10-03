@@ -18,7 +18,23 @@ DRACUT_NO_XATTR=1 dracut --force --no-hostonly --zstd --reproducible \
 	--add "dmsquash-live dmsquash-live-autooverlay" \
 	"/usr/lib/modules/$kernel/initramfs.img" "$kernel"
 
+# The installer, built against this image's Qt and glibc: QML compiled ahead
+# of time only runs on the Qt it was built with.
+while read -r name built; do
+	have=$(rpm -q --qf '%{VERSION}' "$name")
+	[ "$have" = "$built" ] || {
+		echo "build.sh: the installer was built with $name $built, but the image has $have; rebuild the dev container (podman rmi localhost/atlas-installer-dev)" >&2
+		exit 1
+	}
+done </src/installer/built-with
+cp -a /src/installer/root/. /
+
+# The live session: autologin as atlas-installer into a bare Plasma session
+# that runs the installer full-screen (rootfs/usr/share/atlas-installer-session).
 cp -a /src/rootfs/. /
+# plasma-setup's allow list of global shortcuts: screen reader and zoom only.
+cp /usr/share/plasma-setup/kglobalaccelrc /usr/share/atlas-installer-session/config/
+systemd-sysusers /usr/lib/sysusers.d/atlas-installer-session.conf
 
 # Nothing that updates, installs or checks the system runs live: the live
 # root is thrown away at shutdown.

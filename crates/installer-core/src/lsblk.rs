@@ -138,6 +138,10 @@ impl Device {
     pub fn tran(&self) -> Option<&str> {
         Self::text(&self.tran)
     }
+
+    pub fn serial(&self) -> Option<&str> {
+        Self::text(&self.serial)
+    }
 }
 
 /// lsblk prints numbers and booleans as JSON values in util-linux 2.37 and

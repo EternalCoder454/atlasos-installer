@@ -1,0 +1,6 @@
+# Nothing to update in the live session.
+[Desktop Entry]
+Type=Application
+Name=Atlas Updater (tray)
+Exec=atlas-updater --tray
+Hidden=true

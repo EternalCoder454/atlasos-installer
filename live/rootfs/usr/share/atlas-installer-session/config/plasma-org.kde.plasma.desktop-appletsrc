@@ -1,0 +1,7 @@
+[Containments][1]
+formfactor=2
+location=3
+plugin=org.kde.panel
+
+[Containments][1][General]
+thickness=0

@@ -142,7 +142,9 @@ pub fn validate_uuid(s: &str) -> Result<(), String> {
 
 /// If `keyfile` (a NetworkManager `.nmconnection`) is the connection `uuid`,
 /// the copy for the installed system: the same, without `permissions=`,
-/// which would tie it to the live session's user.
+/// which would tie it to the live session's user, and without
+/// `interface-name=`, which NetworkManager adds on AddAndActivateConnection
+/// and which would keep a USB adapter on another port from connecting.
 pub fn keyfile_for_install(keyfile: &str, uuid: &str) -> Option<String> {
     let mut section = "";
     let mut found = false;
@@ -156,7 +158,7 @@ pub fn keyfile_for_install(keyfile: &str, uuid: &str) -> Option<String> {
         {
             match k.trim() {
                 "uuid" => found |= v.trim().eq_ignore_ascii_case(uuid),
-                "permissions" => continue,
+                "permissions" | "interface-name" => continue,
                 _ => {}
             }
         }
@@ -282,10 +284,11 @@ mod tests {
 
     #[test]
     fn keyfile_copy_matches_uuid_and_drops_permissions() {
-        let kf = "[connection]\nid=Home\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\ntype=wifi\npermissions=user:atlas-installer;\n\n\
+        let kf = "[connection]\nid=Home\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\ntype=wifi\ninterface-name=wlan0\npermissions=user:atlas-installer;\n\n\
                   [wifi]\nssid=Home\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=secret\n\n[vpn]\npermissions=keep\n";
         let out = keyfile_for_install(kf, "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f").unwrap();
         assert!(!out.contains("permissions=user"));
+        assert!(!out.contains("interface-name"), "{out}");
         assert!(out.contains("psk=secret\n"));
         assert!(
             out.contains("[vpn]\npermissions=keep\n"),

@@ -9,12 +9,14 @@
 //! | `nodisks` | No disk can be offered |
 //! | `onedisk` | Only the Windows disk, so it is chosen for you |
 //! | `emptydisk` | Only the empty disk |
+//! | `twins` | Two empty disks of the same model and size |
 //! | `busy` | ListDisks answers Busy |
 //! | `fail` | The install fails while copying |
 //! | `hold` | The install stops moving at 42 % (to screenshot it) |
 //! | `mok` | NVIDIA with Secure Boot on: the Restart page shows a MOK password |
 //! | `warn` | The install succeeds with warnings |
 //! | `fast` | The install takes 2 seconds instead of 20 |
+//! | `cd` | Started from a disc, not a USB stick (the Restart page's wording) |
 //!
 //! `ATLAS_INSTALLER_DEMO_PAGE=<step>` opens at a step (welcome, keyboard,
 //! wifi, disk, review, progress, restart), with the first disk chosen.
@@ -32,12 +34,14 @@ pub struct Flags {
     pub nodisks: bool,
     pub onedisk: bool,
     pub emptydisk: bool,
+    pub twins: bool,
     pub busy: bool,
     pub fail: bool,
     pub hold: bool,
     pub mok: bool,
     pub warn: bool,
     pub fast: bool,
+    pub cd: bool,
 }
 
 /// `None` unless `ATLAS_INSTALLER_DEMO` is set (and not empty or `0`).
@@ -65,10 +69,12 @@ pub fn parse(v: &str) -> Option<Flags> {
             "nodisks" => f.nodisks = true,
             "onedisk" => f.onedisk = true,
             "emptydisk" => f.emptydisk = true,
+            "twins" => f.twins = true,
             "busy" => f.busy = true,
             "fail" => f.fail = true,
             "hold" => f.hold = true,
             "mok" => f.mok = true,
+            "cd" => f.cd = true,
             "warn" => f.warn = true,
             "fast" => f.fast = true,
             _ => {}
@@ -86,14 +92,25 @@ pub async fn list_disks(f: &Flags) -> Result<String, helper::Error> {
         return Ok(r#"{"disks":[],"hidden":[]}"#.into());
     }
     let all = include_str!("../fixtures/disks.json");
-    let keep = match (f.onedisk, f.emptydisk) {
-        (true, _) => "nvme0n1",
-        (_, true) => "sda",
+    let keep = match (f.emptydisk || f.twins, f.onedisk) {
+        (true, _) => "sda",
+        (_, true) => "nvme0n1",
         _ => return Ok(all.into()),
     };
     let mut list: serde_json::Value = serde_json::from_str(all).expect("fixture");
     if let Some(disks) = list["disks"].as_array_mut() {
         disks.retain(|d| d["id"] == keep);
+        if f.twins
+            && let Some(first) = disks.first_mut()
+        {
+            first["serial"] = "2214E61A4F2A".into();
+            let mut twin = first.clone();
+            twin["id"] = "sdb".into();
+            twin["path"] = "/dev/sdb".into();
+            twin["serial"] = "2214E61A87B3".into();
+            twin["fingerprint"] = "0000000000000b3b".into();
+            disks.push(twin);
+        }
     }
     Ok(list.to_string())
 }
@@ -194,6 +211,7 @@ pub async fn install(f: &Flags, progress: impl Fn(f64, String)) -> Result<String
             String::new()
         },
         windows_entry: true,
+        boot_media: if f.cd { "cd" } else { "usb" }.into(),
         warnings: if f.warn {
             vec!["The firmware boot entry couldn't be renamed to AtlasOS: it is still called Fedora.".into()]
         } else {
@@ -204,6 +222,7 @@ pub async fn install(f: &Flags, progress: impl Fn(f64, String)) -> Result<String
     Ok(serde_json::json!({
         "mok_password": if done.mok_password.is_empty() { None } else { Some(done.mok_password) },
         "windows_entry": done.windows_entry,
+        "boot_media": done.boot_media,
         "warnings": done.warnings,
         "log": done.log,
     })
