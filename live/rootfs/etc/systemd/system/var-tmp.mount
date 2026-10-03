@@ -1,0 +1,14 @@
+# The live root is an overlay with its writable half under /run, which is
+# small. ostree's temporary files during an install need more room.
+[Unit]
+Description=Larger /var/tmp for the live session
+ConditionKernelCommandLine=rd.live.image
+
+[Mount]
+What=tmpfs
+Where=/var/tmp
+Type=tmpfs
+Options=mode=1777,size=50%,nr_inodes=1m
+
+[Install]
+WantedBy=local-fs.target

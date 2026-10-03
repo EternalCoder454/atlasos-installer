@@ -1,0 +1,15 @@
+# Containers storage can't put overlay layers on the live root (itself an
+# overlay), so its writable store lives on a tmpfs. The image to install is
+# read from /usr/lib/containers/storage on the ISO.
+[Unit]
+Description=Containers storage for the live session
+ConditionKernelCommandLine=rd.live.image
+
+[Mount]
+What=tmpfs
+Where=/var/lib/containers
+Type=tmpfs
+Options=mode=0700,size=25%
+
+[Install]
+WantedBy=local-fs.target

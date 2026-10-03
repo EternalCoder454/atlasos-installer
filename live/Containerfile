@@ -1,0 +1,18 @@
+# The live session on the AtlasOS ISO: the published image plus what a live
+# boot needs. It is never installed: the installer copies the published image
+# underneath it (embedded by iso/build-iso.sh), not this one.
+#
+#   podman build --build-arg BASE_IMAGE=ghcr.io/eternalcoder454/atlasos@sha256:... \
+#     -f live/Containerfile -t localhost/atlasos-live .
+
+ARG BASE_IMAGE
+
+# The build script and files, bound into the build rather than copied in.
+FROM scratch AS ctx
+COPY live /
+
+FROM ${BASE_IMAGE}
+
+RUN --mount=type=bind,from=ctx,source=/,target=/src \
+    --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
+    /src/build.sh
