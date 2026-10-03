@@ -1,0 +1,123 @@
+{
+   "blockdevices": [
+      {
+         "name": "/dev/sda",
+         "kname": "/dev/sda",
+         "type": "disk",
+         "size": 68719476736,
+         "ro": false,
+         "rm": true,
+         "hotplug": true,
+         "tran": "usb",
+         "model": "Flair",
+         "vendor": "SanDisk ",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "dos",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/sda1",
+               "kname": "/dev/sda1",
+               "type": "part",
+               "size": 68684873728,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "Ventoy",
+               "partlabel": null,
+               "parttype": "0x7",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda1",
+               "uuid": null,
+               "fstype": "exfat",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "dos",
+               "log-sec": 512,
+               "children": [
+                  {
+                     "name": "/dev/mapper/ventoy",
+                     "kname": "/dev/dm-0",
+                     "type": "dm",
+                     "size": 3576848384,
+                     "ro": false,
+                     "rm": false,
+                     "hotplug": false,
+                     "tran": null,
+                     "model": null,
+                     "vendor": null,
+                     "label": "ATLASOS",
+                     "partlabel": null,
+                     "parttype": null,
+                     "partuuid": null,
+                     "uuid": null,
+                     "fstype": "iso9660",
+                     "mountpoints": [
+                        "/run/initramfs/live"
+                     ],
+                     "pttype": null,
+                     "log-sec": 512
+                  }
+               ]
+            },
+            {
+               "name": "/dev/sda2",
+               "kname": "/dev/sda2",
+               "type": "part",
+               "size": 33554432,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "VTOYEFI",
+               "partlabel": null,
+               "parttype": "0xef",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda2",
+               "uuid": null,
+               "fstype": "vfat",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "dos",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/nvme0n1",
+         "kname": "/dev/nvme0n1",
+         "type": "disk",
+         "size": 549755813888,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": "nvme",
+         "model": "WD_BLACK SN850X 500GB",
+         "vendor": null,
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512
+      }
+   ]
+}

@@ -1,0 +1,44 @@
+{
+   "partitiontable": {
+      "label": "gpt",
+      "id": "2610FDE9-3850-41C5-A345-26A8408B3470",
+      "device": "/dev/sda",
+      "unit": "sectors",
+      "firstlba": 34,
+      "lastlba": 268435422,
+      "sectorsize": 512,
+      "partitions": [
+         {
+            "node": "/dev/sda1",
+            "start": 2048,
+            "size": 204800,
+            "type": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+            "uuid": "37DF3229-55D9-43EF-902C-A5A6565F521A",
+            "name": "EFI system partition",
+            "attrs": "GUID:63"
+         },{
+            "node": "/dev/sda2",
+            "start": 206848,
+            "size": 32768,
+            "type": "E3C9E316-0B5C-4DB8-817D-F92DF00215AE",
+            "uuid": "485B4EC0-0FBD-41D2-B951-F28415248F51",
+            "name": "Microsoft reserved partition",
+            "attrs": "GUID:63"
+         },{
+            "node": "/dev/sda3",
+            "start": 239616,
+            "size": 124229632,
+            "type": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
+            "uuid": "A1831DD5-7B34-4057-936B-10BEAB360E2D",
+            "name": "Basic data partition"
+         },{
+            "node": "/dev/sda4",
+            "start": 124469248,
+            "size": 1597440,
+            "type": "DE94BBA4-06D1-4D40-A16A-BFD50179D6AC",
+            "uuid": "A341DE8A-E770-429D-A175-E60747A07BFE",
+            "attrs": "RequiredPartition GUID:63"
+         }
+      ]
+   }
+}

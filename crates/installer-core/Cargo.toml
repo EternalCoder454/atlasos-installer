@@ -1,0 +1,15 @@
+[package]
+name = "installer-core"
+description = "Disk listing, partition planning and settings for Atlas Installer (pure logic, no I/O)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "installer_core"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

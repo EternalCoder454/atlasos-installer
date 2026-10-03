@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Eterneon</vendor>
+  <vendor_url>https://github.com/EternalCoder454/atlasos-installer</vendor_url>
+
+  <action id="net.eterneon.atlas.installer.list-disks">
+    <description>List the disks AtlasOS can be installed on</description>
+    <message>Authentication is required to list the disks AtlasOS can be installed on</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="net.eterneon.atlas.installer.install">
+    <description>Install AtlasOS</description>
+    <message>Authentication is required to install AtlasOS, which changes the partitions on a disk</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="net.eterneon.atlas.installer.reboot">
+    <description>Restart the computer after installing AtlasOS</description>
+    <message>Authentication is required to restart the computer</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

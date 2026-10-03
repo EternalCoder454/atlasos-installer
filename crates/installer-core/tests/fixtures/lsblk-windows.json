@@ -1,0 +1,144 @@
+{
+   "blockdevices": [
+      {
+         "name": "/dev/sda",
+         "kname": "/dev/sda",
+         "type": "disk",
+         "size": 137438953472,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": "sata",
+         "model": "QEMU HARDDISK",
+         "vendor": "ATA     ",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "gpt",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/sda1",
+               "kname": "/dev/sda1",
+               "type": "part",
+               "size": 104857600,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": "EFI system partition",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda1",
+               "uuid": "4A1B-2C3D",
+               "fstype": "vfat",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/sda2",
+               "kname": "/dev/sda2",
+               "type": "part",
+               "size": 16777216,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": "Microsoft reserved partition",
+               "parttype": "e3c9e316-0b5c-4db8-817d-f92df00215ae",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda2",
+               "uuid": null,
+               "fstype": null,
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/sda3",
+               "kname": "/dev/sda3",
+               "type": "part",
+               "size": 63605571584,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": "Basic data partition",
+               "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda3",
+               "uuid": "5C2E8C0B2E8BE0C6",
+               "fstype": "ntfs",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/sda4",
+               "kname": "/dev/sda4",
+               "type": "part",
+               "size": 817889280,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": null,
+               "parttype": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda4",
+               "uuid": "9E4A2D2B4A2D02F1",
+               "fstype": "ntfs",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/sr0",
+         "kname": "/dev/sr0",
+         "type": "rom",
+         "size": 3576848384,
+         "ro": true,
+         "rm": true,
+         "hotplug": false,
+         "tran": "sata",
+         "model": "QEMU DVD-ROM",
+         "vendor": "QEMU    ",
+         "label": "ATLASOS",
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": "iso9660",
+         "mountpoints": [
+            "/run/initramfs/live"
+         ],
+         "pttype": null,
+         "log-sec": 512
+      }
+   ]
+}

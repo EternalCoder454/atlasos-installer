@@ -1,0 +1,24 @@
+[Unit]
+Description=AtlasOS installer helper (partitions a disk and runs bootc install)
+Documentation=https://github.com/EternalCoder454/atlasos-installer
+
+[Service]
+Type=dbus
+BusName=net.eterneon.atlas.InstallerHelper
+ExecStart=/usr/libexec/atlas-installer-helper
+# No sandboxing on purpose (no ProtectSystem, PrivateTmp, PrivateMounts,
+# ProtectHome, NoNewPrivileges, ...). The helper writes partition tables,
+# formats and mounts filesystems under /run/atlas-target, runs bootc against
+# the live system's container storage and writes firmware boot entries; the
+# mounts must be visible to bootc and to the user's session. It exits by
+# itself after 60 seconds without calls.
+#
+# Stopping: the helper handles SIGTERM itself. It refuses new calls, releases
+# its bus name and waits for a running install (up to 40 s), then stops its
+# commands. An install stopped half-way leaves the target disk unbootable (the
+# disk is re-installed from scratch next time), which is why the helper holds
+# a logind block inhibitor for shutdown and sleep while Install runs.
+# KillMode=mixed sends SIGTERM to the helper only and SIGKILL to leftovers
+# when TimeoutStopSec runs out.
+KillMode=mixed
+TimeoutStopSec=60

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Test VMs for the installer, in the system libvirt (qemu:///system).
 
-    vm.py create <name> --iso PATH [--usb] [--disk GB ...] [--secure-boot]
+    vm.py create <name> --iso PATH [--usb] [--disk GB ...] [--secure-boot] [--media-first]
                  [--disk-file PATH ...] [--memory MB] [--sata]
     vm.py exec <name> <shell command>      run as root in the guest, print output
     vm.py ssh <name> <shell command>       run as root over SSH (installed systems)
+    vm.py push <name> <local> <guest path> [--mode 755]   copy a file in
     vm.py wait <name> [seconds]            wait for the guest agent
     vm.py shot <name> <out.png>            screenshot the display
     vm.py destroy <name>                   stop and remove the VM and its disks
@@ -18,6 +19,7 @@ agent, which AtlasOS enables.
 
 import argparse
 import base64
+import hashlib
 import json
 import pathlib
 import subprocess
@@ -62,7 +64,9 @@ def create(a: argparse.Namespace) -> None:
         "--noautoconsole", "--import",
     ]
     bus = "sata" if a.sata else "virtio"
-    order = 1
+    # disks boot first unless --media-first (a disk with Windows on it would
+    # boot instead of the installer)
+    order = 2 if a.media_first else 1
     for i, gb in enumerate(a.disk):
         path = VMDIR / f"{dom}-disk{i}.qcow2"
         subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", str(path), f"{gb}G"], check=True)
@@ -74,6 +78,8 @@ def create(a: argparse.Namespace) -> None:
     # libvirt would chown the ISO to qemu and never give it back, so a rebuilt
     # ISO couldn't be written over it. It's world-readable, so qemu needs no chown.
     iso = pathlib.Path(a.iso).resolve()
+    if a.media_first:
+        order = 1
     if a.usb:
         cmd += ["--disk", f"path={iso},device=disk,bus=usb,readonly=on,boot.order={order},seclabel0.model=dac,seclabel0.relabel=no"]
     else:
@@ -112,6 +118,24 @@ def exec_(a: argparse.Namespace) -> None:
     sys.stdout.write(out)
     sys.stderr.write(err)
     sys.exit(code)
+
+
+def push(a: argparse.Namespace) -> None:
+    """Through the guest agent, in chunks that keep each virsh argument under
+    Linux's 128 KiB limit for one argv string."""
+    dom = domain(a.name)
+    data = pathlib.Path(a.local).read_bytes()
+    h = agent(dom, "guest-file-open", path=a.guest, mode="w")
+    try:
+        for i in range(0, len(data), 64 * 1024):
+            agent(dom, "guest-file-write", handle=h, **{"buf-b64": base64.b64encode(data[i:i + 64 * 1024]).decode()})
+    finally:
+        agent(dom, "guest-file-close", handle=h)
+    code, out, err = run(dom, f"chmod {a.mode} '{a.guest}' && sha256sum '{a.guest}'", 30)
+    want = hashlib.sha256(data).hexdigest()
+    if code != 0 or not out.startswith(want):
+        sys.exit(f"push failed: {out}{err}")
+    print(f"{a.guest} ({len(data)} bytes)")
 
 
 def ssh(a: argparse.Namespace) -> None:
@@ -162,6 +186,7 @@ def main() -> None:
     c.add_argument("--disk", type=int, action="append", default=[], help="a new blank disk of this many GB")
     c.add_argument("--disk-file", action="append", default=[], help="an existing disk image")
     c.add_argument("--secure-boot", action="store_true")
+    c.add_argument("--media-first", action="store_true", help="boot the ISO before the disks")
     c.add_argument("--memory", type=int, default=8192)
     c.add_argument("--sata", action="store_true", help="target disks on SATA, not virtio (Windows has no virtio driver)")
     c.set_defaults(fn=create)
@@ -178,6 +203,13 @@ def main() -> None:
     h.add_argument("name")
     h.add_argument("command")
     h.set_defaults(fn=ssh)
+    u = sub.add_parser("push")
+    u.add_argument("name")
+    u.add_argument("local")
+    u.add_argument("guest")
+    u.add_argument("--mode", default="644")
+    u.set_defaults(fn=push)
+
     s = sub.add_parser("shot")
     s.add_argument("name")
     s.add_argument("out")

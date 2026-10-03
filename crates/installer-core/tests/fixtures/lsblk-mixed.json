@@ -1,0 +1,591 @@
+{
+   "blockdevices": [
+      {
+         "name": "/dev/loop0",
+         "kname": "/dev/loop0",
+         "type": "loop",
+         "size": 3221225472,
+         "ro": true,
+         "rm": false,
+         "hotplug": false,
+         "tran": null,
+         "model": null,
+         "vendor": null,
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": "squashfs",
+         "mountpoints": [
+            "/run/rootfsbase"
+         ],
+         "pttype": null,
+         "log-sec": 512
+      },
+      {
+         "name": "/dev/sda",
+         "kname": "/dev/sda",
+         "type": "disk",
+         "size": 68719476736,
+         "ro": false,
+         "rm": true,
+         "hotplug": true,
+         "tran": "usb",
+         "model": "Ultra",
+         "vendor": "SanDisk ",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "dos",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/sda1",
+               "kname": "/dev/sda1",
+               "type": "part",
+               "size": 3576848384,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "ATLASOS",
+               "partlabel": null,
+               "parttype": "0x0",
+               "partuuid": "00000000-0000-0000-0000-000000v0sda1",
+               "uuid": null,
+               "fstype": "iso9660",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "dos",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/sdb",
+         "kname": "/dev/sdb",
+         "type": "disk",
+         "size": 34359738368,
+         "ro": false,
+         "rm": true,
+         "hotplug": true,
+         "tran": "usb",
+         "model": "DataTraveler 3.0",
+         "vendor": "Kingston",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "dos",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/sdb1",
+               "kname": "/dev/sdb1",
+               "type": "part",
+               "size": 3576848384,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "ATLASOS",
+               "partlabel": null,
+               "parttype": "0x0",
+               "partuuid": "00000000-0000-0000-0000-000000v0sdb1",
+               "uuid": null,
+               "fstype": "iso9660",
+               "mountpoints": [
+                  "/run/initramfs/live"
+               ],
+               "pttype": "dos",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/sdc",
+         "kname": "/dev/sdc",
+         "type": "disk",
+         "size": 1073741824000,
+         "ro": false,
+         "rm": false,
+         "hotplug": true,
+         "tran": "usb",
+         "model": "Extreme",
+         "vendor": "SanDisk ",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "gpt",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/sdc1",
+               "kname": "/dev/sdc1",
+               "type": "part",
+               "size": 1073739726848,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "Backup",
+               "partlabel": null,
+               "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+               "partuuid": "00000000-0000-0000-0000-000000v0sdc1",
+               "uuid": null,
+               "fstype": "exfat",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/sdd",
+         "kname": "/dev/sdd",
+         "type": "disk",
+         "size": 32212254720,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": "sata",
+         "model": "KINGSTON SA400S37",
+         "vendor": "ATA     ",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512
+      },
+      {
+         "name": "/dev/sde",
+         "kname": "/dev/sde",
+         "type": "disk",
+         "size": 2147483648000,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": "sata",
+         "model": "ST2000DM008",
+         "vendor": "ATA     ",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": "linux_raid_member",
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/md127",
+               "kname": "/dev/md127",
+               "type": "raid1",
+               "size": 2147483648000,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": null,
+               "parttype": null,
+               "partuuid": null,
+               "uuid": null,
+               "fstype": "ext4",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": null,
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/sdf",
+         "kname": "/dev/sdf",
+         "type": "disk",
+         "size": 8589934592,
+         "ro": true,
+         "rm": true,
+         "hotplug": true,
+         "tran": "usb",
+         "model": "Card Reader",
+         "vendor": "Generic",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512
+      },
+      {
+         "name": "/dev/sdg",
+         "kname": "/dev/sdg",
+         "type": "disk",
+         "size": 0,
+         "ro": false,
+         "rm": true,
+         "hotplug": true,
+         "tran": "usb",
+         "model": "SD Reader",
+         "vendor": "Generic",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512
+      },
+      {
+         "name": "/dev/sr0",
+         "kname": "/dev/sr0",
+         "type": "rom",
+         "size": 0,
+         "ro": false,
+         "rm": true,
+         "hotplug": false,
+         "tran": "sata",
+         "model": "DVD RW",
+         "vendor": "HL-DT-ST",
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512
+      },
+      {
+         "name": "/dev/zram0",
+         "kname": "/dev/zram0",
+         "type": "disk",
+         "size": 8589934592,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": null,
+         "model": null,
+         "vendor": null,
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            "[SWAP]"
+         ],
+         "pttype": null,
+         "log-sec": 512
+      },
+      {
+         "name": "/dev/nvme0n1",
+         "kname": "/dev/nvme0n1",
+         "type": "disk",
+         "size": 1000204886016,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": "nvme",
+         "model": "Samsung SSD 990 PRO 1TB",
+         "vendor": null,
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "gpt",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/nvme0n1p1",
+               "kname": "/dev/nvme0n1p1",
+               "type": "part",
+               "size": 104857600,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": null,
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+               "partuuid": "00000000-0000-0000-0000-000000e0n1p1",
+               "uuid": "1234-ABCD",
+               "fstype": "vfat",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/nvme0n1p2",
+               "kname": "/dev/nvme0n1p2",
+               "type": "part",
+               "size": 16777216,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": null,
+               "parttype": "e3c9e316-0b5c-4db8-817d-f92df00215ae",
+               "partuuid": "00000000-0000-0000-0000-000000e0n1p2",
+               "uuid": null,
+               "fstype": null,
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/nvme0n1p3",
+               "kname": "/dev/nvme0n1p3",
+               "type": "part",
+               "size": 536870912000,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": null,
+               "partlabel": null,
+               "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+               "partuuid": "00000000-0000-0000-0000-000000e0n1p3",
+               "uuid": null,
+               "fstype": "BitLocker",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/nvme0n1p4",
+               "kname": "/dev/nvme0n1p4",
+               "type": "part",
+               "size": 2147483648,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "boot",
+               "partlabel": null,
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "partuuid": "00000000-0000-0000-0000-000000e0n1p4",
+               "uuid": null,
+               "fstype": "ext4",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/nvme0n1p5",
+               "kname": "/dev/nvme0n1p5",
+               "type": "part",
+               "size": 429496729600,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "fedora",
+               "partlabel": null,
+               "parttype": "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
+               "partuuid": "00000000-0000-0000-0000-000000e0n1p5",
+               "uuid": null,
+               "fstype": "btrfs",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/vda",
+         "kname": "/dev/vda",
+         "type": "disk",
+         "size": 68719476736,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": null,
+         "model": null,
+         "vendor": null,
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": "gpt",
+         "log-sec": 512,
+         "children": [
+            {
+               "name": "/dev/vda1",
+               "kname": "/dev/vda1",
+               "type": "part",
+               "size": 629145600,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "EFI",
+               "partlabel": null,
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+               "partuuid": "00000000-0000-0000-0000-000000v0vda1",
+               "uuid": null,
+               "fstype": "vfat",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/vda2",
+               "kname": "/dev/vda2",
+               "type": "part",
+               "size": 2147483648,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "boot",
+               "partlabel": null,
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "partuuid": "00000000-0000-0000-0000-000000v0vda2",
+               "uuid": null,
+               "fstype": "ext4",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            },
+            {
+               "name": "/dev/vda3",
+               "kname": "/dev/vda3",
+               "type": "part",
+               "size": 65498251264,
+               "ro": false,
+               "rm": false,
+               "hotplug": false,
+               "tran": null,
+               "model": null,
+               "vendor": null,
+               "label": "atlasos",
+               "partlabel": null,
+               "parttype": "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
+               "partuuid": "00000000-0000-0000-0000-000000v0vda3",
+               "uuid": null,
+               "fstype": "btrfs",
+               "mountpoints": [
+                  null
+               ],
+               "pttype": "gpt",
+               "log-sec": 512
+            }
+         ]
+      },
+      {
+         "name": "/dev/vdb",
+         "kname": "/dev/vdb",
+         "type": "disk",
+         "size": 68719476736,
+         "ro": false,
+         "rm": false,
+         "hotplug": false,
+         "tran": null,
+         "model": null,
+         "vendor": null,
+         "label": null,
+         "partlabel": null,
+         "parttype": null,
+         "partuuid": null,
+         "uuid": null,
+         "fstype": null,
+         "mountpoints": [
+            null
+         ],
+         "pttype": null,
+         "log-sec": 512
+      }
+   ]
+}
