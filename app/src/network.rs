@@ -102,6 +102,7 @@ const DEVICE_ACTIVATED: u32 = 100;
 const ACTIVE_ACTIVATED: u32 = 2;
 const ACTIVE_DEACTIVATED: u32 = 4;
 const DEVICE_DISCONNECTED: u32 = 30;
+const DEVICE_IP_CONFIG: u32 = 70;
 const DEVICE_FAILED: u32 = 120;
 
 /// How a network is secured.
@@ -166,6 +167,7 @@ pub fn ssid_from_hex(hex: &str) -> Option<Vec<u8>> {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Network {
     /// For display (invalid UTF-8 shown as replacement characters).
     pub ssid: String,
@@ -564,6 +566,8 @@ type Reason = std::sync::Arc<std::sync::Mutex<Option<u32>>>;
 
 struct Watch {
     reason: Reason,
+    /// The adapter got past the password and is asking for an address.
+    ip_config: std::sync::Arc<std::sync::atomic::AtomicBool>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -576,6 +580,8 @@ impl Drop for Watch {
 async fn watch_reason(c: &zbus::Connection, dev: &OwnedObjectPath) -> Watch {
     let reason: Reason = Default::default();
     let kept = reason.clone();
+    let ip_config = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = ip_config.clone();
     let stream = match device(c, dev).await {
         Ok(d) => d.receive_device_state_changed().await.ok(),
         Err(_) => None,
@@ -583,8 +589,11 @@ async fn watch_reason(c: &zbus::Connection, dev: &OwnedObjectPath) -> Watch {
     let task = tokio::spawn(async move {
         let Some(mut stream) = stream else { return };
         while let Some(sig) = futures_util::StreamExt::next(&mut stream).await {
-            if let Ok(a) = sig.args()
-                && matches!(a.new_state, DEVICE_FAILED | DEVICE_DISCONNECTED)
+            let Ok(a) = sig.args() else { continue };
+            if a.new_state == DEVICE_IP_CONFIG {
+                seen.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            if matches!(a.new_state, DEVICE_FAILED | DEVICE_DISCONNECTED)
                 && !matches!(
                     a.reason,
                     REASON_NONE | REASON_UNKNOWN | REASON_USER_REQUESTED | REASON_NEW_ACTIVATION
@@ -594,7 +603,11 @@ async fn watch_reason(c: &zbus::Connection, dev: &OwnedObjectPath) -> Watch {
             }
         }
     });
-    Watch { reason, task }
+    Watch {
+        reason,
+        ip_config,
+        task,
+    }
 }
 
 // NMDeviceStateReason
@@ -625,6 +638,11 @@ fn failure_message(ssid: &str, security: Security, reason: Option<u32>) -> Strin
         }
         // also what a deauthentication or a weak signal looks like
         Some(REASON_SUPPLICANT_DISCONNECT) if security.needs_password() => format!(
+            "Couldn't connect to {ssid}. Check the password, and that the network is in range."
+        ),
+        // a WPA3 access point that turns the password down shows up as
+        // this too: the supplicant only sees it refuse
+        Some(REASON_SSID_NOT_FOUND) if security == Security::Sae => format!(
             "Couldn't connect to {ssid}. Check the password, and that the network is in range."
         ),
         Some(REASON_SSID_NOT_FOUND) => {
@@ -672,7 +690,12 @@ async fn wait_activated(
         )
     };
     let a = active(c, active_path).await.map_err(|_| failed(false))?;
-    for _ in 0..150 {
+    // 45 s, or 90 s once the adapter is asking for an address: longer
+    // than NetworkManager's own 45 s for DHCP, so its reason comes first
+    for i in 0..300 {
+        if i >= 150 && !watch.ip_config.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
         match a.state().await {
             Ok(ACTIVE_ACTIVATED) => return Ok(uuid.to_string()),
             Ok(ACTIVE_DEACTIVATED) | Err(_) => {
@@ -787,6 +810,16 @@ mod tests {
         // Latin-1 "Caf\xe9": not UTF-8
         let raw = b"Caf\xe9";
         assert_eq!(ssid_hex(raw), "436166e9");
+        // the page keys rows and connects by this name
+        let json = serde_json::to_value(Network {
+            ssid: String::from_utf8_lossy(raw).into(),
+            ssid_hex: ssid_hex(raw),
+            strength: 50,
+            security: Security::Psk,
+            active: false,
+        })
+        .unwrap();
+        assert_eq!(json["ssidHex"], "436166e9");
         assert_eq!(ssid_from_hex("436166e9").unwrap(), raw);
         assert_eq!(ssid_from_hex(""), None);
         assert_eq!(ssid_from_hex("abc"), None);
@@ -884,5 +917,9 @@ mod tests {
         assert!(failure_message("Home", psk, None).contains("timed out"));
         assert!(failure_message("Home", psk, Some(REASON_DHCP_FAILED)).contains("DHCP"));
         assert!(failure_message("Home", psk, Some(REASON_SSID_NOT_FOUND)).contains("out of range"));
+        assert!(
+            failure_message("Home", Security::Sae, Some(REASON_SSID_NOT_FOUND))
+                .contains("password")
+        );
     }
 }
