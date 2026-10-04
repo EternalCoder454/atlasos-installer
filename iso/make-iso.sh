@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the AtlasOS live ISO, without root.
 #
-#   iso/make-iso.sh [--local] [-o FILE] [atlasos|atlasos-nvidia] [tag]
+#   iso/make-iso.sh [--local] [--verify-only] [-o FILE] [atlasos|atlasos-nvidia] [tag]
 #
 # By default it embeds the published ghcr.io/eternalcoder454/<name>:<tag>
 # (tag: stable), pinned by the digest the tag points to now, so an installed
@@ -14,19 +14,26 @@
 # ghcr.io/eternalcoder454/<name>:stable: the name the helper installs from
 # and the installed system tracks.
 #
+# A published image is only used after its cosign signature checks out against
+# AtlasOS's cosign.pub (../AtlasOS/cosign.pub, or ATLASOS_COSIGN_PUB), the same
+# policy the installed system updates under. --local images are not signed and
+# skip the check. --verify-only stops after that check.
+#
 # Output: build/<name>.iso, or FILE, and beside it FILE.image naming the
 # image it installs.
 set -euo pipefail
 
 usage() {
-	echo "usage: $0 [--local] [-o FILE] [atlasos|atlasos-nvidia] [tag]" >&2
+	echo "usage: $0 [--local] [--verify-only] [-o FILE] [atlasos|atlasos-nvidia] [tag]" >&2
 	exit 2
 }
 local=0
+verify_only=0
 out=
 while [ $# -gt 0 ]; do
 	case $1 in
 	--local) local=1 ;;
+	--verify-only) verify_only=1 ;;
 	-o)
 		[ -n "${2:-}" ] || usage
 		out=$(realpath -m -- "$2")
@@ -38,6 +45,10 @@ while [ $# -gt 0 ]; do
 	shift
 done
 [ $# -le 2 ] || usage
+if [ "$verify_only" = 1 ] && [ "$local" = 1 ]; then
+	echo "--verify-only checks a published image's signature; it can't be used with --local." >&2
+	exit 2
+fi
 name=${1:-atlasos}
 repo=ghcr.io/eternalcoder454/$name
 # The same chunkah AtlasOS's Justfile pins.
@@ -52,6 +63,49 @@ cd "$(dirname "$0")/.."
 out=${out:-$PWD/build/$name.iso}
 mkdir -p build/cache build/iso-work "$(dirname "$out")"
 
+# Checks the cosign signature of $1@$2 against the public key, then leaves the
+# image's blobs in the OCI layout $3. skopeo enforces a throwaway policy
+# (sigstoreSigned, matchRepository, everything else rejected) like the
+# installed system's, and a layout that already holds the blobs is not
+# downloaded again. A failed check writes nothing to the layout.
+verify_signature() {
+	local repo=$1 digest=$2 oci=$3 pub work rc=0
+	pub=${ATLASOS_COSIGN_PUB:-$PWD/../AtlasOS/cosign.pub}
+	[ -r "$pub" ] || {
+		echo "No cosign public key at $pub: set ATLASOS_COSIGN_PUB, or use --local." >&2
+		return 1
+	}
+	work=$(mktemp -d build/.verify.XXXXXX)
+	_verify_signature "$repo" "$digest" "$oci" "$pub" "$work" || rc=$?
+	rm -rf "$work"
+	return "$rc"
+}
+
+_verify_signature() {
+	local repo=$1 digest=$2 oci=$3 pub=$4 work=$5 blob
+	# skopeo reuses a blob already in the layout by its digest without
+	# hashing it again, so a blob cut short by a killed run would pass.
+	# Hash them first and drop the bad ones: skopeo then fetches them again.
+	if [ -d "$oci/blobs/sha256" ]; then
+		for blob in "$oci"/blobs/sha256/*; do
+			[ -f "$blob" ] || continue
+			[ "$(sha256sum <"$blob" | cut -d' ' -f1)" = "${blob##*/}" ] || rm -f -- "$blob"
+		done
+	fi
+	jq -n --arg repo "$repo" --arg key "$(realpath -- "$pub")" \
+		'{default: [{type: "reject"}], transports: {docker: {($repo): [{type: "sigstoreSigned", keyPaths: [$key], signedIdentity: {type: "matchRepository"}}]}}}' \
+		>"$work/policy.json"
+	mkdir "$work/registries.d"
+	printf 'docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: true\n' >"$work/registries.d/atlasos.yaml"
+	echo ">> Verifying the cosign signature of $repo@$digest"
+	skopeo --policy "$work/policy.json" --registries.d "$work/registries.d" \
+		copy --preserve-digests --remove-signatures --quiet "docker://$repo@$digest" "oci:$oci:latest" || {
+		echo "The signature of $repo@$digest could not be verified against $pub (see above). Not building." >&2
+		return 1
+	}
+	echo ">> Signature verified"
+}
+
 if [ "$local" = 1 ]; then
 	tag=${2:-latest}
 	base=localhost/$name:$tag
@@ -62,6 +116,7 @@ if [ "$local" = 1 ]; then
 	short=local-${id:0:8}
 	source="$base ($id)"
 	echo ">> $base is $id"
+	echo ">> --local: the image is not signed, signature not checked"
 	# From here on the image is named by its ID, in case the tag moves.
 	base=$id
 	# Rechunked the way CI does before publishing (AtlasOS's `just rechunk`,
@@ -94,12 +149,10 @@ else
 	base=$repo@$digest
 	source=$base
 	echo ">> $repo:$tag is $digest"
-	podman pull -q "$base" >/dev/null
 	oci=build/cache/$name-$short
-	[ -f "$oci/index.json" ] || {
-		echo ">> Saving the published blobs to $oci"
-		skopeo copy --preserve-digests --quiet "docker://$base" "oci:$oci:latest"
-	}
+	verify_signature "$repo" "$digest" "$oci"
+	[ "$verify_only" = 1 ] && exit 0
+	podman pull -q "$base" >/dev/null
 fi
 
 # The installer must be built against the image's own Qt, Kirigami and glibc

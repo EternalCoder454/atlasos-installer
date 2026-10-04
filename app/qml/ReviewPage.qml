@@ -79,6 +79,11 @@ InstallerPage {
                     title: qsTr("Disk")
                     value: page.disk ? page.disk.title + " (" + page.disk.subtitle.split(" · ")[0] + ")" : ""
                 }
+                SectionRow {
+                    iconName: "lock"
+                    title: qsTr("Encryption")
+                    value: page.app.backend.reviewEncryption(page.app.encryption)
+                }
             }
 
             Note {
@@ -93,6 +98,13 @@ InstallerPage {
                 visible: page.app.backend.nvidia && page.app.backend.secureBoot
                 kind: "info"
                 text: qsTr("Secure Boot is on, so the NVIDIA driver needs the AtlasOS key. After the restart, a blue screen asks you to enroll it, once. The last page shows the password and the steps.")
+            }
+
+            Note {
+                Layout.fillWidth: true
+                visible: page.app.installRefusal.length > 0
+                kind: "error"
+                text: page.app.installRefusal
             }
 
             Note {

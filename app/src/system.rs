@@ -49,11 +49,39 @@ pub fn nvidia() -> bool {
     Path::new("/usr/share/atlasos/nvidia/atlasos-module-signing.der").exists()
 }
 
-/// Running from the installer media (`rd.live.image`), never an installed
-/// system or a developer's desktop.
+/// Running from the installer media, never an installed system or a
+/// developer's desktop. Fails closed: an unreadable `/proc/cmdline` counts
+/// as the live session.
 pub fn live_session() -> bool {
-    std::fs::read_to_string("/proc/cmdline")
-        .is_ok_and(|c| c.split_whitespace().any(|w| w == "rd.live.image"))
+    let cmdline = std::fs::read_to_string("/proc/cmdline").ok();
+    let users: Vec<String> = ["USER", "LOGNAME"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .collect();
+    is_live(
+        cmdline.as_deref(),
+        &users,
+        Path::new("/run/atlas-installer-session").exists(),
+        Path::new("/run/initramfs/live").exists(),
+    )
+}
+
+/// The decision behind [`live_session`], from its inputs: the kernel command
+/// line (`None` if unreadable), the user names in the environment, and
+/// whether the session's home and the live mount exist.
+pub fn is_live(
+    cmdline: Option<&str>,
+    users: &[String],
+    session_dir: bool,
+    live_mount: bool,
+) -> bool {
+    let Some(cmdline) = cmdline else {
+        return true;
+    };
+    cmdline.split_whitespace().any(|w| w == "rd.live.image")
+        || users.iter().any(|u| u == "atlas-installer")
+        || session_dir
+        || live_mount
 }
 
 fn config_dir() -> Option<PathBuf> {
@@ -115,6 +143,24 @@ pub async fn apply_keymap(keymap: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_decision_fails_closed() {
+        let none: Vec<String> = Vec::new();
+        let me = vec!["zach".to_string()];
+        assert!(is_live(None, &me, false, false));
+        assert!(is_live(Some("quiet rd.live.image"), &me, false, false));
+        assert!(is_live(
+            Some("quiet"),
+            &["atlas-installer".into()],
+            false,
+            false
+        ));
+        assert!(is_live(Some("quiet"), &none, true, false));
+        assert!(is_live(Some("quiet"), &none, false, true));
+        assert!(!is_live(Some("quiet rd.live.imagex"), &me, false, false));
+        assert!(!is_live(Some("quiet ro"), &me, false, false));
+    }
 
     #[test]
     fn kxkbrc_text() {

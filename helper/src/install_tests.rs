@@ -7,6 +7,10 @@ use super::*;
 
 const LSBLK: &str = include_str!("../../crates/installer-core/tests/fixtures/lsblk-windows.json");
 const SFDISK: &str = include_str!("../../crates/installer-core/tests/fixtures/sfdisk-windows.json");
+const RECOVERY_KEY: &str =
+    "ulcbjnni-ehtlcfnl-ntenkltt-vjuiicdf-hvdkerji-fjkurjhr-lckjntdb-kvkeeide";
+const GRUB_HASH: &str = "grub.pbkdf2.sha512.10000.A81F1971A0042577.12F7519BDEA05552";
+const PASSWORD: &str = "correct horse battery";
 const UUID: &str = "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f";
 
 /// bootc's output from spike S3.
@@ -36,9 +40,24 @@ struct Fake {
     /// sfdisk moves the Windows partition (the safety check must catch it).
     move_partition: bool,
     enrolled: bool,
+    /// /proc/self/mounts as bootc started.
+    mounts_at_bootc: Mutex<String>,
+    /// systemd-cryptenroll prints something that is not a recovery key.
+    bad_recovery: bool,
+    /// The encrypted root that `cryptsetup open` made and nothing closed
+    /// yet: (partition, mapper name).
+    crypt_open: Mutex<Option<(String, String)>>,
     /// What `restart_now` was asked to unmount, once called (the real one
     /// restarts the computer).
     restarted: Mutex<Option<Vec<String>>>,
+    /// Another disk shows up under the same name from the n-th lsblk call on.
+    swap_disk_at_lsblk: Option<usize>,
+    lsblk_calls: Mutex<usize>,
+    /// The partition that held an open map: it shows as LUKS when closed too.
+    luks_part: Mutex<Option<String>>,
+    /// `cryptsetup close` fails as busy and `--deferred` "succeeds" without
+    /// closing the map.
+    close_only_deferred: bool,
 }
 
 fn ok(stdout: &str) -> Result<Output, String> {
@@ -47,6 +66,21 @@ fn ok(stdout: &str) -> Result<Output, String> {
         stdout: stdout.into(),
         stderr: String::new(),
     })
+}
+
+/// lsblk's answer with an open encrypted root on `part`.
+fn lsblk_with_crypt(part: &str, mapper: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(LSBLK).unwrap();
+    let disk = &mut v["blockdevices"][0];
+    let children = disk["children"].as_array_mut().unwrap();
+    let at = children.iter().position(|c| c["name"] == part).unwrap_or(2); // a leftover from before the new table
+    children[at]["fstype"] = "crypto_LUKS".into();
+    children[at]["label"] = "atlasos".into();
+    children[at]["children"] = serde_json::json!([{
+        "name": format!("/dev/mapper/{mapper}"), "kname": "/dev/dm-0", "type": "crypt",
+        "size": 1, "mountpoints": [null],
+    }]);
+    v.to_string()
 }
 
 /// The partitions an sfdisk script asks for.
@@ -94,6 +128,17 @@ impl Runner for Fake {
         }
         let mounts = self.root.join("proc/self/mounts");
         let target = self.target.to_str().unwrap();
+        if args.first() == Some(&"luksFormat") {
+            // the temporary key is a private file in a private directory
+            use std::os::unix::fs::MetadataExt;
+            let i = args.iter().position(|a| *a == "--key-file").unwrap();
+            let key = Path::new(args[i + 1]);
+            let m = fs::symlink_metadata(key).unwrap();
+            assert!(m.file_type().is_file());
+            assert_eq!((m.mode() & 0o7777, m.len()), (0o600, 64));
+            let d = fs::metadata(key.parent().unwrap()).unwrap();
+            assert_eq!(d.mode() & 0o7777, 0o700);
+        }
         match (cmd.name(), args.as_slice()) {
             ("mount", [.., dev, dir]) if dir.starts_with(target) && !dev.starts_with("remount") => {
                 let mut m = fs::read_to_string(&mounts).unwrap();
@@ -101,7 +146,7 @@ impl Runner for Fake {
                 fs::write(&mounts, m).unwrap();
                 ok("")
             }
-            ("umount", ["--recursive", dir]) => {
+            ("umount", ["--recursive", dir]) | ("umount", ["--recursive", "--lazy", dir]) => {
                 let m: String = fs::read_to_string(&mounts)
                     .unwrap()
                     .lines()
@@ -111,7 +156,161 @@ impl Runner for Fake {
                 fs::write(&mounts, m).unwrap();
                 ok("")
             }
-            ("lsblk", _) => ok(LSBLK),
+            ("umount", [dir]) | ("umount", ["--lazy", dir]) => {
+                let m: String = fs::read_to_string(&mounts)
+                    .unwrap()
+                    .lines()
+                    .filter(|l| l.split(' ').nth(1).unwrap() != *dir)
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                fs::write(&mounts, m).unwrap();
+                ok("")
+            }
+            ("findmnt", ["--json", "--list", "--output", "TARGET,SOURCE"]) => {
+                let fs_list: Vec<_> = fs::read_to_string(&mounts)
+                    .unwrap()
+                    .lines()
+                    .map(|l| {
+                        let mut f = l.split(' ');
+                        let (src, dir) = (f.next().unwrap(), f.next().unwrap());
+                        serde_json::json!({"target": dir, "source": src})
+                    })
+                    .collect();
+                ok(&serde_json::json!({ "filesystems": fs_list }).to_string())
+            }
+            ("lsblk", _) => {
+                let n = {
+                    let mut c = lock(&self.lsblk_calls);
+                    *c += 1;
+                    *c
+                };
+                if self.swap_disk_at_lsblk.is_some_and(|at| n >= at) {
+                    return ok(&LSBLK.replace("QEMU HARDDISK", "SOMEONE ELSES DISK"));
+                }
+                let open = lock(&self.crypt_open).clone();
+                let mut seen = lock(&self.luks_part);
+                if let Some((part, _)) = &open {
+                    *seen = Some(part.clone());
+                }
+                ok(&match (open, seen.as_deref()) {
+                    (Some((part, mapper)), _) => lsblk_with_crypt(&part, &mapper),
+                    (None, Some(part)) => {
+                        let mut v: serde_json::Value =
+                            serde_json::from_str(&lsblk_with_crypt(part, "x")).unwrap();
+                        let at = v["blockdevices"][0]["children"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .position(|c| c["fstype"] == "crypto_LUKS")
+                            .unwrap();
+                        v["blockdevices"][0]["children"][at]["children"] = serde_json::json!([]);
+                        v.to_string()
+                    }
+                    (None, None) => LSBLK.to_string(),
+                })
+            }
+            ("cryptsetup", ["open", "--allow-discards", "--key-file", _, part, mapper]) => {
+                *lock(&self.crypt_open) = Some((part.to_string(), mapper.to_string()));
+                ok("")
+            }
+            ("cryptsetup", ["close", "--deferred", mapper]) => {
+                // closed once the last user is gone: here, at once
+                if self.close_only_deferred {
+                    return ok("");
+                }
+                let mut open = lock(&self.crypt_open);
+                if open.as_ref().is_some_and(|(_, m)| m == mapper) {
+                    *open = None;
+                }
+                ok("")
+            }
+            ("cryptsetup", ["close", _]) if self.close_only_deferred => Ok(Output {
+                code: Some(5),
+                stdout: String::new(),
+                stderr: "Device is still in use.".into(),
+            }),
+            ("cryptsetup", ["close", mapper]) => {
+                let m = fs::read_to_string(&mounts).unwrap();
+                if m.contains(&format!("/dev/mapper/{mapper} ")) {
+                    return Ok(Output {
+                        code: Some(5),
+                        stdout: String::new(),
+                        stderr: format!("Device {mapper} is still in use."),
+                    });
+                }
+                let mut open = lock(&self.crypt_open);
+                if open.as_ref().is_some_and(|(_, m)| m == mapper) {
+                    *open = None;
+                }
+                ok("")
+            }
+            ("systemd-cryptenroll", [_, "--recovery-key", _]) => {
+                // as on a pipe: the key alone on stdout, the banner on stderr
+                Ok(Output {
+                    code: Some(0),
+                    stdout: if self.bad_recovery {
+                        "A secret recovery key has been generated\n".into()
+                    } else {
+                        format!("{RECOVERY_KEY}\n")
+                    },
+                    stderr: "A secret recovery key has been generated for this volume:\n".into(),
+                })
+            }
+            ("cryptsetup", ["open", "--test-passphrase", rest @ ..])
+                if rest.contains(&"--key-file") =>
+            {
+                // As cryptsetup 2.8 does: with a TPM token enrolled, an
+                // open that may use tokens succeeds whatever key it got.
+                let calls = lock(&self.calls);
+                let tpm = calls
+                    .iter()
+                    .any(|c| c.args.iter().any(|a| a == "--tpm2-device=auto"));
+                if tpm && !rest.contains(&"--disable-external-tokens") {
+                    return ok("");
+                }
+                let i = rest.iter().position(|a| *a == "--key-file").unwrap();
+                let right = if rest[i + 1] == "-" {
+                    let given = cmd.stdin.as_deref().unwrap_or_default();
+                    given == RECOVERY_KEY || given == PASSWORD
+                } else {
+                    // the temporary key, which luksRemoveKey made useless
+                    !calls
+                        .iter()
+                        .any(|c| c.args.first().map(String::as_str) == Some("luksRemoveKey"))
+                };
+                Ok(Output {
+                    code: Some(if right { 0 } else { 2 }),
+                    ..Default::default()
+                })
+            }
+            ("grub2-mkpasswd-pbkdf2", []) => {
+                let given = cmd.stdin.as_deref().unwrap_or_default();
+                let mut twice = given.lines();
+                let pw = twice.next().unwrap_or_default();
+                assert!(pw.len() == 64 && pw.bytes().all(|b| b.is_ascii_hexdigit()));
+                assert_eq!(Some(pw), twice.next(), "twice");
+                ok(&format!(
+                    "Enter password: \nReenter password: \nPBKDF2 hash of your password is {GRUB_HASH}\n"
+                ))
+            }
+            ("cryptsetup", ["luksDump", "--dump-json-metadata", _]) => {
+                let calls = lock(&self.calls);
+                let had = |f: &dyn Fn(&Cmd) -> bool| calls.iter().any(f);
+                let removed = had(&|c| c.args.first().map(String::as_str) == Some("luksRemoveKey"));
+                let tpm = had(&|c| c.args.iter().any(|a| a == "--tpm2-device=auto"));
+                let slots = if removed { 2 } else { 3 };
+                // the temporary key is slot 0
+                let keyslots: serde_json::Map<String, serde_json::Value> = (3 - slots..3)
+                    .map(|i| (i.to_string(), serde_json::json!({"type": "luks2"})))
+                    .collect();
+                let mut tokens = serde_json::json!({
+                    "1": {"type": "systemd-recovery", "keyslots": ["1"]}
+                });
+                if tpm {
+                    tokens["0"] = serde_json::json!({"type": "systemd-tpm2", "keyslots": ["2"]});
+                }
+                ok(&serde_json::json!({"keyslots": keyslots, "tokens": tokens}).to_string())
+            }
             ("sfdisk", ["--json", "/dev/sda"]) => match &*lock(&self.table) {
                 Some(t) => ok(&serde_json::json!({ "partitiontable": t }).to_string()),
                 None => Ok(Output {
@@ -147,6 +346,18 @@ impl Runner for Fake {
                 ok("")
             }
             ("bootc", _) => {
+                *lock(&self.mounts_at_bootc) = fs::read_to_string(&mounts).unwrap();
+                // as the real one: the target stays mounted at its own place
+                let root_dev = fs::read_to_string(&mounts)
+                    .unwrap()
+                    .lines()
+                    .find(|l| l.split(' ').nth(1) == Some(target))
+                    .and_then(|l| l.split(' ').next().map(str::to_string));
+                if let Some(dev) = root_dev {
+                    let mut m = fs::read_to_string(&mounts).unwrap();
+                    m.push_str(&format!("{dev}[/root] /run/bootc/storage x rw 0 0\n"));
+                    fs::write(&mounts, m).unwrap();
+                }
                 for l in BOOTC_OUT.lines() {
                     on_line(Some(l));
                 }
@@ -258,6 +469,11 @@ impl World {
             b"/dev/sr0 /run/initramfs/live iso9660 ro 0 0\n",
         );
         put("dev/sr0", b"");
+        for tool in [bin::CRYPTSETUP, bin::CRYPTENROLL, bin::GRUB2_MKPASSWD] {
+            let rel = tool.trim_start_matches('/');
+            put(rel, b"");
+            fs::set_permissions(env.root.join(rel), fs::Permissions::from_mode(0o755)).unwrap();
+        }
         put(
             "usr/share/systemd/kbd-model-map",
             b"de-latin1-nodeadkeys\tde\tpc105\tnodeadkeys\tterminate:ctrl_alt_bksp\n",
@@ -293,6 +509,7 @@ impl World {
             .filter(|c| {
                 let a = c.args.join(" ");
                 !(c.name() == "lsblk"
+                    || c.name() == "findmnt"
                     || c.name() == "sfdisk" && a.starts_with("--json")
                     || c.name() == "mount" && a.starts_with("-o ro,")
                     || c.name() == "umount" && a.ends_with("esp-probe")
@@ -318,7 +535,17 @@ impl World {
 }
 
 fn req(disk: &str, mode: &str) -> Request {
-    Request::new(disk, "", mode, "de_DE.UTF-8", "de(nodeadkeys)", "").unwrap()
+    Request::new(
+        disk,
+        "",
+        mode,
+        "de_DE.UTF-8",
+        "de(nodeadkeys)",
+        "",
+        "none",
+        "",
+    )
+    .unwrap()
 }
 
 #[test]
@@ -349,7 +576,9 @@ fn free_space_beside_windows() {
              T/ostree/deploy/default/deploy/abc123.0/etc/vconsole.conf \
              T/ostree/deploy/default/deploy/abc123.0/etc/X11 \
              T/ostree/deploy/default/deploy/abc123.0/etc/X11/xorg.conf.d \
-             T/ostree/deploy/default/deploy/abc123.0/etc/X11/xorg.conf.d/00-keyboard.conf",
+             T/ostree/deploy/default/deploy/abc123.0/etc/X11/xorg.conf.d/00-keyboard.conf \
+             T/ostree/deploy/default/deploy/abc123.0/etc/atlasos \
+             T/ostree/deploy/default/deploy/abc123.0/etc/atlasos/installer.ini",
             "setfiles -F -r T \
              T/ostree/deploy/default/deploy/abc123.0/etc/selinux/targeted/contexts/files/file_contexts \
              T/boot/grub2 \
@@ -360,6 +589,7 @@ fn free_space_beside_windows() {
             "efibootmgr --quiet --bootnext 0006",
             "efibootmgr --quiet --delete-bootnum --bootnum 0005",
             "umount --recursive T",
+            "umount --recursive /run/bootc/storage",
         ]
     );
     let script = lock(&w.fake.calls)
@@ -389,6 +619,13 @@ fn free_space_beside_windows() {
             .unwrap()
             .contains("\"nodeadkeys\"")
     );
+    let ini = fs::read_to_string(etc.join("atlasos/installer.ini")).unwrap();
+    assert!(
+        ini.ends_with(
+            "Language=de_DE.UTF-8\nKeyboardLayout=de\nKeyboardVariant=nodeadkeys\nNetwork=false\n"
+        ),
+        "{ini}"
+    );
     let cfg = fs::read_to_string(w.env.target.join("boot/grub2/custom.cfg")).unwrap();
     assert!(cfg.contains("--set=root 4A1B-2C3D\n"), "{cfg}");
 
@@ -396,6 +633,8 @@ fn free_space_beside_windows() {
         out,
         Outcome {
             mok_password: None,
+            recovery_key: None,
+            encryption: "none".into(),
             windows_entry: true,
             boot_media: "cd".into(),
             warnings: vec![],
@@ -480,7 +719,7 @@ fn nvidia_with_secure_boot_queues_the_key() {
     w.put(NVIDIA_KEY, b"der");
     w.put(SECURE_BOOT_VAR, &[6, 0, 0, 0, 1]);
     let out = w.install(&req("sda", "free-space")).0.unwrap();
-    let pw = out.mok_password.expect("queued");
+    let pw = out.mok_password.expect("queued").as_str().to_string();
     assert!(
         pw.len() == 8 && pw.bytes().all(|b| b.is_ascii_digit()),
         "{pw}"
@@ -541,13 +780,25 @@ fn wifi_is_carried_over_without_the_live_user() {
         "etc/NetworkManager/system-connections/Other.nmconnection",
         b"[connection]\nuuid=11111111-2a0c-4d5e-9f1a-3c2b1a0d9e8f\n",
     );
-    let r = Request::new("sda", "", "free-space", "en_US.UTF-8", "us", UUID).unwrap();
+    let r = Request::new(
+        "sda",
+        "",
+        "free-space",
+        "en_US.UTF-8",
+        "us",
+        UUID,
+        "none",
+        "",
+    )
+    .unwrap();
     w.install(&r).0.unwrap();
     let copy = w
         .deploy()
         .join("etc/NetworkManager/system-connections/Home.nmconnection");
     let text = fs::read_to_string(&copy).unwrap();
     assert!(text.contains("psk=secret") && !text.contains("permissions="));
+    let ini = fs::read_to_string(w.deploy().join("etc/atlasos/installer.ini")).unwrap();
+    assert!(ini.contains("\nNetwork=true\n"), "{ini}");
     assert_eq!(
         fs::metadata(&copy).unwrap().permissions().mode() & 0o777,
         0o600
@@ -560,9 +811,74 @@ fn wifi_is_carried_over_without_the_live_user() {
 }
 
 #[test]
+fn the_wizard_is_told_about_the_network() {
+    let network = |w: &World| {
+        let ini = fs::read_to_string(w.deploy().join("etc/atlasos/installer.ini")).unwrap();
+        ini.lines()
+            .find_map(|l| l.strip_prefix("Network="))
+            .unwrap()
+            .to_string()
+    };
+    // a cable in a real Ethernet device
+    let w = World::new();
+    w.put("sys/class/net/enp3s0/type", b"1\n");
+    w.put("sys/class/net/enp3s0/carrier", b"1\n");
+    w.put("sys/class/net/enp3s0/device/vendor", b"0x8086\n");
+    w.install(&req("sda", "free-space")).0.unwrap();
+    assert_eq!(network(&w), "true");
+
+    // no cable, a Wi-Fi card, and virtual Ethernet: nothing to carry
+    let w = World::new();
+    w.put("sys/class/net/enp3s0/type", b"1\n");
+    w.put("sys/class/net/enp3s0/carrier", b"0\n");
+    w.put("sys/class/net/enp3s0/device/vendor", b"0x8086\n");
+    w.put("sys/class/net/wlan0/type", b"1\n");
+    w.put("sys/class/net/wlan0/carrier", b"1\n");
+    w.put("sys/class/net/wlan0/device/vendor", b"0x8086\n");
+    w.put("sys/class/net/wlan0/wireless/x", b"");
+    w.put("sys/class/net/veth0/type", b"1\n");
+    w.put("sys/class/net/veth0/carrier", b"1\n");
+    w.put("sys/class/net/lo/type", b"772\n");
+    w.put("sys/class/net/lo/carrier", b"1\n");
+    w.install(&req("sda", "free-space")).0.unwrap();
+    assert_eq!(network(&w), "false");
+
+    // carrier can't be read (empty, as EINVAL gives): operstate decides
+    for (state, want) in [("up\n", "true"), ("down\n", "false")] {
+        let w = World::new();
+        w.put("sys/class/net/enp3s0/type", b"1\n");
+        w.put("sys/class/net/enp3s0/carrier", b"");
+        w.put("sys/class/net/enp3s0/operstate", state.as_bytes());
+        w.put("sys/class/net/enp3s0/device/vendor", b"0x8086\n");
+        w.install(&req("sda", "free-space")).0.unwrap();
+        assert_eq!(network(&w), want);
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        assert!(log.contains("network enp3s0"), "{log}");
+    }
+    // a carrier of 0 is not overruled by operstate
+    let w = World::new();
+    w.put("sys/class/net/enp3s0/type", b"1\n");
+    w.put("sys/class/net/enp3s0/carrier", b"0\n");
+    w.put("sys/class/net/enp3s0/operstate", b"up\n");
+    w.put("sys/class/net/enp3s0/device/vendor", b"0x8086\n");
+    w.install(&req("sda", "free-space")).0.unwrap();
+    assert_eq!(network(&w), "false");
+}
+
+#[test]
 fn a_missing_wifi_connection_fails_before_any_write() {
     let w = World::new();
-    let r = Request::new("sda", "", "free-space", "en_US.UTF-8", "us", UUID).unwrap();
+    let r = Request::new(
+        "sda",
+        "",
+        "free-space",
+        "en_US.UTF-8",
+        "us",
+        UUID,
+        "none",
+        "",
+    )
+    .unwrap();
     assert!(w.install(&r).0.unwrap_err().contains("Wi-Fi"));
     assert!(w.writes().is_empty());
 }
@@ -594,7 +910,7 @@ fn a_failed_bootloader_rename_is_only_a_warning() {
 
 #[test]
 fn requests_are_checked() {
-    assert!(Request::new("nvme0n1", "", "erase", "en_US.UTF-8", "us", "").is_ok());
+    assert!(Request::new("nvme0n1", "", "erase", "en_US.UTF-8", "us", "", "none", "").is_ok());
     assert!(
         Request::new(
             "nvme0n1",
@@ -602,6 +918,8 @@ fn requests_are_checked() {
             "erase",
             "en_US.UTF-8",
             "us",
+            "",
+            "none",
             ""
         )
         .is_ok()
@@ -613,7 +931,7 @@ fn requests_are_checked() {
         "../../../../etc/x",
     ] {
         assert!(
-            Request::new("sda", f, "erase", "en_US.UTF-8", "us", "").is_err(),
+            Request::new("sda", f, "erase", "en_US.UTF-8", "us", "", "none", "").is_err(),
             "{f}"
         );
     }
@@ -627,7 +945,7 @@ fn requests_are_checked() {
         ("sda", "erase", "en_US.UTF-8", "us", "home"),
     ] {
         assert!(
-            Request::new(d, "", m, l, k, u).is_err(),
+            Request::new(d, "", m, l, k, u, "none", "").is_err(),
             "{d} {m} {l} {k} {u}"
         );
     }
@@ -671,6 +989,7 @@ fn mok_hash_is_the_last_line() {
 fn fingerprint_of(w: &World, disk: &str) -> String {
     let l = list_disks(&w.fake, &w.env).unwrap();
     l.disks
+        .disks
         .into_iter()
         .find(|d| d.id == disk)
         .unwrap()
@@ -681,12 +1000,86 @@ fn fingerprint_of(w: &World, disk: &str) -> String {
 fn the_disk_must_be_the_one_that_was_listed() {
     let w = World::new();
     let f = fingerprint_of(&w, "sda");
-    let other = Request::new("sda", "0000000000000000", "erase", "en_US.UTF-8", "us", "").unwrap();
+    let other = Request::new(
+        "sda",
+        "0000000000000000",
+        "erase",
+        "en_US.UTF-8",
+        "us",
+        "",
+        "none",
+        "",
+    )
+    .unwrap();
     let e = w.install(&other).0.unwrap_err();
     assert!(e.contains("changed since the disks were listed"), "{e}");
     assert!(w.writes().is_empty(), "{:?}", w.writes());
-    let same = Request::new("sda", &f, "erase", "en_US.UTF-8", "us", "").unwrap();
+    let same = Request::new("sda", &f, "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
     w.install(&same).0.unwrap();
+}
+
+#[test]
+fn a_disk_swapped_after_prepare_is_caught_before_the_first_write() {
+    let mut w = World::new();
+    // 1: prepare's probe, 2: the first recheck, 3: unmount_target's
+    // listing, 4: the second recheck
+    w.fake.swap_disk_at_lsblk = Some(3);
+    let f = fingerprint_of(&w, "sda");
+    *lock(&w.fake.lsblk_calls) = 0;
+    let r = Request::new("sda", &f, "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
+    let e = w.install(&r).0.unwrap_err();
+    assert!(e.contains("changed since it was checked"), "{e}");
+    assert!(
+        !w.writes().iter().any(|c| {
+            c.starts_with("wipefs") || c.starts_with("sfdisk") || c.starts_with("mkfs")
+        }),
+        "{:?}",
+        w.writes()
+    );
+}
+
+#[test]
+fn a_disk_swapped_before_the_first_check_is_left_alone() {
+    let mut w = World::new();
+    // 1: prepare's probe, 2: the first recheck
+    w.fake.swap_disk_at_lsblk = Some(2);
+    let f = fingerprint_of(&w, "sda");
+    *lock(&w.fake.lsblk_calls) = 0;
+    let r = Request::new("sda", &f, "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
+    let e = w.install(&r).0.unwrap_err();
+    assert!(e.contains("changed since it was checked"), "{e}");
+    let w_calls = w.writes();
+    assert!(
+        !w_calls
+            .iter()
+            .any(|c| c.starts_with("umount") || c.starts_with("cryptsetup")),
+        "{w_calls:?}"
+    );
+    // nothing, not even the cleanup's disk listing, ran after the recheck
+    assert_eq!(*lock(&w.fake.lsblk_calls), 2);
+}
+
+#[test]
+fn a_partition_table_that_cant_be_read_is_not_called_a_replug() {
+    let w = World::new();
+    let prepared = prepare(&w.fake, &w.env, &req("sda", "free-space")).unwrap();
+    // sfdisk finds no table any more, while lsblk still shows one
+    *lock(&w.fake.table) = None;
+    let e = recheck_disk(&w.fake, &prepared).unwrap_err();
+    assert!(
+        e.contains("Could not read the partition table on /dev/sda"),
+        "{e}"
+    );
+    assert!(!e.contains("replugged"), "{e}");
+}
+
+#[test]
+fn a_table_that_never_could_be_read_can_still_be_erased() {
+    let w = World::new();
+    // listed that way: sfdisk can't read it, though lsblk sees a table
+    *lock(&w.fake.table) = None;
+    let prepared = prepare(&w.fake, &w.env, &req("sda", "erase")).unwrap();
+    recheck_disk(&w.fake, &prepared).unwrap();
 }
 
 #[test]
@@ -726,7 +1119,10 @@ fn symlinks_in_the_new_system_are_not_followed_and_mounts_are_cleaned_up() {
             .join("etc/X11/xorg.conf.d/00-keyboard.conf")
             .exists()
     );
-    assert_eq!(w.writes().last().unwrap(), "umount --recursive T");
+    assert_eq!(
+        w.writes().last().unwrap(),
+        "umount --recursive /run/bootc/storage"
+    );
     let mounts = fs::read_to_string(w.env.root.join("proc/self/mounts")).unwrap();
     assert!(!mounts.contains(w.env.target.to_str().unwrap()), "{mounts}");
 }
@@ -935,4 +1331,1127 @@ fn a_direct_restart_unmounts_what_is_left_of_the_target() {
             t.clone()
         ]
     );
+}
+
+// ---- disk encryption ----
+
+fn enc_req(disk: &str, mode: &str, enc: &str, password: &str) -> Request {
+    Request::new(
+        disk,
+        "",
+        mode,
+        "de_DE.UTF-8",
+        "de(nodeadkeys)",
+        "",
+        enc,
+        password,
+    )
+    .unwrap()
+}
+
+impl World {
+    fn with_tpm(self) -> World {
+        self.put("sys/class/tpm/tpm0/tpm_version_major", b"2\n");
+        self.put("dev/tpmrm0", b"");
+        self
+    }
+
+    /// The LUKS UUID of the install, from the luksFormat call.
+    fn luks_uuid(&self) -> String {
+        let calls = lock(&self.fake.calls);
+        let f = calls
+            .iter()
+            .find(|c| c.args.first().map(String::as_str) == Some("luksFormat"))
+            .expect("luksFormat ran");
+        let i = f.args.iter().position(|a| a == "--uuid").unwrap();
+        f.args[i + 1].clone()
+    }
+
+    /// The writes with the LUKS UUID shown as `U`.
+    fn writes_u(&self) -> Vec<String> {
+        let u = self.luks_uuid();
+        self.writes()
+            .into_iter()
+            .map(|l| l.replace(&u, "U"))
+            .collect()
+    }
+
+    fn key_path(&self) -> PathBuf {
+        self.env.run_dir.join("luks/luks-key")
+    }
+
+    fn bootc_args(&self) -> Vec<String> {
+        lock(&self.fake.calls)
+            .iter()
+            .find(|c| c.name() == "bootc")
+            .expect("bootc ran")
+            .args
+            .clone()
+    }
+}
+
+/// The calls from formatting the root partition to mounting it.
+fn root_steps(writes: &[String]) -> Vec<String> {
+    let from = writes
+        .iter()
+        .position(|l| l == "wipefs --all --quiet /dev/sda6")
+        .unwrap();
+    let to = writes
+        .iter()
+        .position(|l| l.starts_with("mount -o compress"))
+        .unwrap();
+    writes[from..=to].to_vec()
+}
+
+const KEY: &str = "R/luks/luks-key";
+
+#[test]
+fn tpm_encryption_runs_these_commands() {
+    let w = World::new().with_tpm();
+    let (r, seen) = w.install(&enc_req("sda", "free-space", "tpm", ""));
+    let out = r.unwrap();
+    let u = w.luks_uuid();
+    assert_eq!(u.len(), 36);
+    assert_eq!(&u[14..15], "4", "a version 4 UUID");
+    let writes = w.writes_u();
+    assert_eq!(
+        root_steps(&writes),
+        [
+            "wipefs --all --quiet /dev/sda6".to_string(),
+            format!(
+                "cryptsetup luksFormat --type luks2 --batch-mode --uuid U --label atlasos --key-file {KEY} /dev/sda6"
+            ),
+            format!("cryptsetup open --allow-discards --key-file {KEY} /dev/sda6 luks-U"),
+            "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
+            format!("systemd-cryptenroll --unlock-key-file={KEY} --recovery-key /dev/sda6"),
+            format!(
+                "systemd-cryptenroll --unlock-key-file={KEY} --tpm2-device=auto --tpm2-pcrs=7 /dev/sda6"
+            ),
+            "cryptsetup open --test-passphrase --token-only --token-type systemd-tpm2 /dev/sda6"
+                .into(),
+            format!("cryptsetup luksRemoveKey --key-file {KEY} /dev/sda6"),
+            format!(
+                "cryptsetup open --test-passphrase --disable-external-tokens --key-file {KEY} /dev/sda6"
+            ),
+            "cryptsetup luksDump --dump-json-metadata /dev/sda6".into(),
+            "cryptsetup open --test-passphrase --disable-external-tokens --key-file - /dev/sda6"
+                .into(),
+            "mount -o compress=zstd:1 /dev/mapper/luks-U T".into(),
+        ]
+    );
+    // the ESP and /boot stay plain, and the mapper is closed after the umount
+    assert!(writes.contains(&"mkfs.ext4 -q -F -L boot /dev/sda5".to_string()));
+    let n = writes.len();
+    assert_eq!(writes[n - 3], "umount --recursive T");
+    assert_eq!(writes[n - 2], "umount --recursive /run/bootc/storage");
+    assert_eq!(writes[n - 1], "cryptsetup close luks-U");
+    assert!(lock(&w.fake.crypt_open).is_none(), "closed");
+
+    assert_eq!(
+        out.recovery_key.as_ref().map(Secret::as_str),
+        Some(RECOVERY_KEY)
+    );
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    assert!(!w.key_path().exists(), "the temporary key is gone");
+    assert!(seen.iter().all(|p| p.fraction <= 1.0));
+    assert!(seen.iter().any(|p| p.stage == Stage::Format));
+
+    let args = w.bootc_args();
+    let kargs: Vec<&String> = args
+        .iter()
+        .zip(args.iter().skip(1))
+        .filter(|(a, _)| *a == "--karg")
+        .map(|(_, v)| v)
+        .collect();
+    assert_eq!(
+        kargs,
+        [
+            "rootflags=compress=zstd:1",
+            &format!("rd.luks.uuid={u}"),
+            &format!("rd.luks.options={u}=discard,tpm2-device=auto,tries=0"),
+            "vconsole.keymap=de-latin1-nodeadkeys",
+            "rd.shell=0",
+            "rd.emergency=reboot",
+        ]
+    );
+    // the root is mounted from the mapper before bootc runs, and the raw
+    // partition is never mounted
+    let mounted = w.fake.mounts_at_bootc.lock().unwrap().clone();
+    let tgt = w.env.target.display().to_string();
+    assert!(
+        mounted.contains(&format!("/dev/mapper/luks-{u} {tgt} ")),
+        "{mounted}"
+    );
+    assert!(!mounted.contains("/dev/sda6 "), "{mounted}");
+    assert!(
+        w.writes()
+            .iter()
+            .all(|l| !(l.starts_with("mount ") && l.contains("/dev/sda6"))),
+        "{:?}",
+        w.writes()
+    );
+}
+
+#[test]
+fn password_encryption_puts_the_password_on_stdin_only() {
+    let w = World::new();
+    let (r, _) = w.install(&enc_req("sda", "erase", "password", PASSWORD));
+    let out = r.unwrap();
+    let u = w.luks_uuid();
+    // erase: the root is /dev/sda3 here; the sequence is the same
+    let writes = w.writes_u();
+    let root = writes
+        .iter()
+        .find_map(|l| l.strip_prefix("cryptsetup luksFormat "))
+        .and_then(|l| l.rsplit(' ').next())
+        .unwrap()
+        .to_string();
+    let from = writes
+        .iter()
+        .rposition(|l| *l == format!("wipefs --all --quiet {root}"))
+        .unwrap();
+    let to = writes
+        .iter()
+        .position(|l| l.starts_with("mount -o compress"))
+        .unwrap();
+    assert_eq!(
+        writes[from..=to],
+        [
+            format!("wipefs --all --quiet {root}"),
+            format!(
+                "cryptsetup luksFormat --type luks2 --batch-mode --uuid U --label atlasos --key-file {KEY} {root}"
+            ),
+            format!("cryptsetup open --allow-discards --key-file {KEY} {root} luks-U"),
+            "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
+            format!("systemd-cryptenroll --unlock-key-file={KEY} --recovery-key {root}"),
+            format!("cryptsetup luksAddKey --key-file {KEY} --new-keyfile - {root}"),
+            format!("cryptsetup luksRemoveKey --key-file {KEY} {root}"),
+            format!(
+                "cryptsetup open --test-passphrase --disable-external-tokens --key-file {KEY} {root}"
+            ),
+            format!("cryptsetup luksDump --dump-json-metadata {root}"),
+            format!(
+                "cryptsetup open --test-passphrase --disable-external-tokens --key-file - {root}"
+            ),
+            format!(
+                "cryptsetup open --test-passphrase --disable-external-tokens --key-file - {root}"
+            ),
+            "mount -o compress=zstd:1 /dev/mapper/luks-U T".into(),
+        ]
+    );
+    assert_eq!(
+        out.recovery_key.as_ref().map(Secret::as_str),
+        Some(RECOVERY_KEY)
+    );
+    assert!(!w.key_path().exists());
+
+    let calls = lock(&w.fake.calls);
+    let add = calls
+        .iter()
+        .find(|c| c.args.first().map(String::as_str) == Some("luksAddKey"))
+        .unwrap();
+    assert_eq!(add.stdin.as_deref(), Some(PASSWORD), "no trailing newline");
+    assert!(add.secret);
+    // the password is on stdin of those two commands and nowhere else
+    for c in calls.iter() {
+        let holds = |t: &str| {
+            c.program.contains(t)
+                || c.args.iter().any(|a| a.contains(t))
+                || c.stdin.as_deref() == Some(t)
+        };
+        assert!(!c.args.iter().any(|a| a.contains(PASSWORD)), "{c:?}");
+        if holds(PASSWORD) {
+            assert!(c.secret && c.args.contains(&"-".to_string()), "{c:?}");
+        }
+    }
+    drop(calls);
+
+    let args = w.bootc_args();
+    for k in [
+        format!("rd.luks.uuid={u}"),
+        format!("rd.luks.options={u}=discard,tries=0"),
+        "vconsole.keymap=de-latin1-nodeadkeys".to_string(),
+        "rd.shell=0".to_string(),
+        "rd.emergency=reboot".to_string(),
+    ] {
+        assert!(args.contains(&k), "{k}: {args:?}");
+    }
+    assert!(!args.iter().any(|a| a.contains("tpm2")));
+}
+
+#[test]
+fn every_encrypted_mode_keeps_asking_for_the_key() {
+    for (enc, pw) in [("tpm", ""), ("tpm-pin", PIN), ("password", PASSWORD)] {
+        let w = World::new().with_tpm();
+        w.install(&enc_req("sda", "free-space", enc, pw)).0.unwrap();
+        assert!(
+            w.bootc_args()
+                .iter()
+                .any(|a| a.starts_with("rd.luks.options=") && a.ends_with(",tries=0")),
+            "{enc}"
+        );
+    }
+}
+
+#[test]
+fn bootcs_own_mount_is_released_before_the_volume_is_closed() {
+    for (enc, pw) in [("tpm", ""), ("password", PASSWORD), ("none", "")] {
+        let w = World::new().with_tpm();
+        let out = w.install(&enc_req("sda", "free-space", enc, pw)).0.unwrap();
+        let writes = if enc == "none" {
+            w.writes()
+        } else {
+            w.writes_u()
+        };
+        let at = |l: &str| writes.iter().position(|w| w == l);
+        let storage = at("umount --recursive /run/bootc/storage");
+        assert!(storage.is_some(), "{enc}: {writes:?}");
+        if enc != "none" {
+            let close =
+                at("cryptsetup close luks-U").unwrap_or_else(|| panic!("{enc}: {writes:?}"));
+            assert!(storage < Some(close), "{enc}: {writes:?}");
+            assert!(at("cryptsetup close --deferred luks-U").is_none(), "{enc}");
+        }
+        assert!(out.warnings.is_empty(), "{enc}: {:?}", out.warnings);
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        assert!(log.contains("unmounted /run/bootc/storage"), "{enc}: {log}");
+    }
+}
+
+#[test]
+fn secrets_stay_out_of_the_log() {
+    for (enc, pw) in [("tpm", ""), ("password", PASSWORD)] {
+        let w = World::new().with_tpm();
+        let out = w.install(&enc_req("sda", "free-space", enc, pw)).0.unwrap();
+        assert!(out.recovery_key.is_some());
+        assert_eq!(out.encryption, enc);
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        assert!(!log.contains(RECOVERY_KEY), "{enc}");
+        assert!(!log.contains(PASSWORD), "{enc}");
+        assert!(!log.contains("ulcbjnni"), "{enc}");
+        assert!(log.contains("$ /usr/bin/cryptsetup luksFormat"));
+        assert!(log.contains("$ /usr/bin/systemd-cryptenroll (arguments hidden)"));
+        // the key's name is fine; its contents were never in a command
+        let key = w.key_path();
+        assert!(!key.exists());
+    }
+}
+
+#[test]
+fn without_encryption_cryptsetup_is_never_run() {
+    let w = World::new();
+    let out = w.install(&req("sda", "free-space")).0.unwrap();
+    assert_eq!(out.recovery_key, None);
+    assert_eq!(out.encryption, "none");
+    assert!(
+        lock(&w.fake.calls)
+            .iter()
+            .all(|c| !c.program.contains("crypt")),
+    );
+    assert!(!w.env.run_dir.join("luks").exists());
+    assert!(!w.bootc_args().iter().any(|a| a.contains("luks")));
+}
+
+#[test]
+fn a_tpm_that_does_not_unlock_stops_the_install() {
+    let mut w = World::new().with_tpm();
+    w.fake.fail = vec!["cryptsetup open --test-passphrase --token-only"];
+    let e = w
+        .install(&enc_req("sda", "free-space", "tpm", ""))
+        .0
+        .unwrap_err();
+    assert!(e.contains(TPM_FAILED), "{e}");
+    let writes = w.writes_u();
+    assert!(
+        writes
+            .iter()
+            .all(|l| !l.contains("luksRemoveKey") && !l.starts_with("bootc")),
+        "{writes:?}"
+    );
+    assert!(!w.key_path().exists(), "the temporary key is gone");
+    assert!(lock(&w.fake.crypt_open).is_none(), "the mapper is closed");
+    assert_eq!(writes.last().unwrap(), "cryptsetup close luks-U");
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(log.contains("FAILED: This PC's security chip"));
+    assert!(log.contains("# exit 1"), "{log}");
+
+    // the enrollment itself failing says the same
+    let mut w = World::new().with_tpm();
+    let tmp = w.env.run_dir.join("luks/luks-key");
+    w.fake.fail = vec![leak(format!(
+        "systemd-cryptenroll --unlock-key-file={} --tpm2-device=auto",
+        tmp.display()
+    ))];
+    let e = w
+        .install(&enc_req("sda", "free-space", "tpm", ""))
+        .0
+        .unwrap_err();
+    assert!(e.contains(TPM_FAILED), "{e}");
+    assert!(!tmp.exists());
+}
+
+/// `Fake::fail` wants `&'static str`; a test's few leaks are harmless.
+fn leak(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+#[test]
+fn the_key_is_removed_whatever_fails() {
+    for fail in [
+        "cryptsetup luksFormat",
+        "cryptsetup open --allow-discards",
+        "mkfs.btrfs",
+        "systemd-cryptenroll",
+        "cryptsetup luksAddKey",
+        "cryptsetup luksRemoveKey",
+        "cryptsetup luksDump",
+        "cryptsetup open --test-passphrase --disable-external-tokens --key-file -",
+        "mount -o compress",
+        "bootc",
+    ] {
+        let mut w = World::new();
+        w.fake.fail = vec![fail];
+        let e = w
+            .install(&enc_req("sda", "free-space", "password", PASSWORD))
+            .0
+            .unwrap_err();
+        assert!(!w.key_path().exists(), "{fail}: {e}");
+        assert!(
+            !e.contains(PASSWORD) && !e.contains(RECOVERY_KEY),
+            "{fail}: {e}"
+        );
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        assert!(
+            !log.contains(PASSWORD) && !log.contains(RECOVERY_KEY),
+            "{fail}"
+        );
+        if !fail.starts_with("cryptsetup luksFormat") {
+            let writes = w.writes_u();
+            assert!(
+                lock(&w.fake.crypt_open).is_none(),
+                "{fail}: the mapper is closed: {writes:?}"
+            );
+        }
+        let m = fs::read_to_string(w.env.root.join("proc/self/mounts")).unwrap();
+        assert!(!m.contains("/dev/mapper/"), "{fail}: unmounted");
+    }
+}
+
+#[test]
+fn a_late_failure_unmounts_before_it_closes_the_mapper() {
+    let mut w = World::new();
+    w.fake.fail = vec!["bootc"];
+    w.install(&enc_req("sda", "free-space", "password", PASSWORD))
+        .0
+        .unwrap_err();
+    let writes = w.writes_u();
+    let n = writes.len();
+    assert_eq!(writes[n - 2], "umount --recursive T");
+    assert_eq!(writes[n - 1], "cryptsetup close luks-U");
+}
+
+#[test]
+fn a_recovery_key_that_is_not_one_is_refused_and_not_shown() {
+    let mut w = World::new();
+    w.fake.bad_recovery = true;
+    let e = w
+        .install(&enc_req("sda", "free-space", "password", PASSWORD))
+        .0
+        .unwrap_err();
+    assert!(e.contains("while creating the recovery key"), "{e}");
+    assert!(!e.contains("generated"), "the tool's output stays out: {e}");
+    assert!(!w.key_path().exists());
+}
+
+#[test]
+fn a_temporary_key_that_still_works_fails_the_install() {
+    let mut w = World::new();
+    // the probe exits 1 (not 2, "no key matched"): the key is not known gone
+    let key = w.env.run_dir.join("luks/luks-key");
+    w.fake.fail = vec![leak(format!(
+        "cryptsetup open --test-passphrase --disable-external-tokens --key-file {}",
+        key.display()
+    ))];
+    let e = w
+        .install(&enc_req("sda", "free-space", "password", PASSWORD))
+        .0
+        .unwrap_err();
+    assert!(e.contains("while removing the temporary key"), "{e}");
+    assert!(
+        fs::read_to_string(w.env.log_path())
+            .unwrap()
+            .contains("encryption failed while removing")
+    );
+}
+
+#[test]
+fn tpm_needs_a_tpm_2() {
+    // none at all
+    let w = World::new();
+    let e = w
+        .install(&enc_req("sda", "free-space", "tpm", ""))
+        .0
+        .unwrap_err();
+    assert!(e.contains("no usable security chip"), "{e}");
+    assert!(w.writes().is_empty(), "{:?}", w.writes());
+    // a TPM 1.2, and a 2.0 without the resource manager
+    let w = World::new();
+    w.put("sys/class/tpm/tpm0/tpm_version_major", b"1\n");
+    w.put("dev/tpmrm0", b"");
+    assert!(!tpm2_present(&w.env));
+    let w = World::new();
+    w.put("sys/class/tpm/tpm0/tpm_version_major", b"2\n");
+    assert!(!tpm2_present(&w.env));
+    // junk names are not chips
+    let w = World::new();
+    w.put("sys/class/tpm/tpmrm0/tpm_version_major", b"2\n");
+    w.put("dev/tpmrm0", b"");
+    assert!(!tpm2_present(&w.env));
+    // a second chip may be the 2.0 one
+    let w = World::new();
+    w.put("sys/class/tpm/tpm0/tpm_version_major", b"1\n");
+    w.put("sys/class/tpm/tpm1/tpm_version_major", b"2\n");
+    w.put("dev/tpmrm0", b"");
+    assert!(tpm2_present(&w.env));
+    // password and no encryption don't care
+    let w = World::new();
+    assert!(
+        w.install(&enc_req("sda", "free-space", "password", PASSWORD))
+            .0
+            .is_ok()
+    );
+}
+
+#[test]
+fn the_listing_says_whether_there_is_a_tpm() {
+    let w = World::new();
+    let l = list_disks(&w.fake, &w.env).unwrap();
+    assert!(!l.tpm2);
+    assert_eq!(serde_json::to_value(&l).unwrap()["tpm2"], false);
+    let w = World::new().with_tpm();
+    let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
+    assert_eq!(v["tpm2"], true);
+    assert!(v["disks"].is_array() && v["hidden"].is_array());
+}
+
+#[test]
+fn requests_with_encryption_are_checked() {
+    let new =
+        |enc: &str, pw: &str| Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", enc, pw);
+    assert!(new("none", "").is_ok());
+    assert!(new("tpm", "").is_ok());
+    assert!(new("password", "12345678").is_ok());
+    assert!(new("password", &"x".repeat(256)).is_ok(), "256 characters");
+    assert!(new("password", "pass word  ~!").is_ok());
+    assert!(new("tpm-pin", "123456").is_ok());
+    assert!(new("tpm-pin", &"9".repeat(64)).is_ok());
+    for (enc, pw) in [
+        ("TPM", ""),
+        ("yes", ""),
+        ("", ""),
+        ("none ", ""),
+        ("none", "12345678"),
+        ("tpm", "12345678"),
+        ("password", ""),
+        ("password", "1234567"),
+        ("password", &"x".repeat(257)),
+        ("password", "pässwörd"),
+        ("password", "日本語のパスワードです"),
+        ("password", "abcdefgh\u{a0}"),
+        ("tpm-pin", ""),
+        ("tpm-pin", "12345"),
+        ("tpm-pin", &"9".repeat(65)),
+        ("tpm-pin", "12345é"),
+        ("tpm-pin", "12345\n6"),
+        ("tpm-pins", "123456"),
+        ("password", "abcdefgh\n"),
+        ("password", "abcdefgh\r"),
+        ("password", "abc\tdefgh"),
+        ("password", "abcdefg\0h"),
+        ("password", "abcdefgh\u{7f}"),
+        ("password", "abcdefgh\u{1b}"),
+        ("password", "abcdefgh\u{80}"),
+        ("password", "abcdefgh\u{9f}"),
+    ] {
+        assert!(new(enc, pw).is_err(), "{enc:?} {pw:?}");
+    }
+    // the password is never in a Debug print
+    let r = new("password", PASSWORD).unwrap();
+    assert!(!format!("{r:?}").contains(PASSWORD));
+}
+
+#[test]
+fn the_plan_shows_the_encryption_without_secrets() {
+    for (enc, pw, want) in [
+        ("tpm", "", "--tpm2-device=auto --tpm2-pcrs=7"),
+        ("password", PASSWORD, "luksAddKey"),
+    ] {
+        let w = World::new().with_tpm();
+        let r = enc_req("sda", "free-space", enc, pw);
+        let p = prepare(&w.fake, &w.env, &r).unwrap();
+        let text = describe(&p, &r, &w.env);
+        let u = p.luks_uuid.clone().unwrap();
+        assert!(text.contains(want), "{text}");
+        assert!(text.contains(&format!("--karg rd.luks.uuid={u}")), "{text}");
+        assert!(text.contains("<temporary key>"));
+        assert!(!text.contains(PASSWORD) && !text.contains(RECOVERY_KEY));
+        assert!(
+            !text.contains("mkfs.btrfs -q -f -L atlasos /dev/sda6"),
+            "the root is formatted on the mapper: {text}"
+        );
+        assert!(text.contains(&format!("mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-{u}")));
+        assert!(w.writes().is_empty(), "describing writes nothing");
+    }
+    let w = World::new();
+    let r = req("sda", "free-space");
+    let p = prepare(&w.fake, &w.env, &r).unwrap();
+    assert!(describe(&p, &r, &w.env).contains("encryption: none"));
+}
+
+#[test]
+fn a_mapper_left_by_a_failed_attempt_is_closed_before_the_disk_is_written() {
+    let w = World::new();
+    let stale = format!("luks-{UUID}");
+    *lock(&w.fake.crypt_open) = Some(("/dev/sda3".into(), stale.clone()));
+    let out = w.install(&req("sda", "erase")).0.unwrap();
+    assert!(out.warnings.is_empty());
+    let writes = w.writes();
+    let close = writes
+        .iter()
+        .position(|l| *l == format!("cryptsetup close {stale}"))
+        .expect("closed");
+    let first_write = writes
+        .iter()
+        .position(|l| l.starts_with("wipefs") || l.starts_with("sfdisk"))
+        .unwrap();
+    assert!(close < first_write, "{writes:?}");
+    assert!(lock(&w.fake.crypt_open).is_none());
+
+    // another disk's mapper is left alone: lsblk shows it under sda only, so
+    // asking for a different disk closes nothing
+    let w = World::new();
+    *lock(&w.fake.crypt_open) = Some(("/dev/sda3".into(), stale));
+    let l = Lsblk::parse(&lsblk_with_crypt("/dev/sda3", &format!("luks-{UUID}"))).unwrap();
+    assert!(l.luks_mappers_on("/dev/sdb").is_empty());
+}
+
+#[test]
+fn a_mapper_that_will_not_close_stops_the_install_before_any_write() {
+    let mut w = World::new();
+    *lock(&w.fake.crypt_open) = Some(("/dev/sda3".into(), format!("luks-{UUID}")));
+    w.fake.fail = vec!["cryptsetup close"];
+    let e = w.install(&req("sda", "erase")).0.unwrap_err();
+    assert!(e.contains("couldn't be closed"), "{e}");
+    assert!(
+        w.writes()
+            .iter()
+            .all(|l| !l.starts_with("wipefs") && !l.starts_with("sfdisk")),
+        "{:?}",
+        w.writes()
+    );
+}
+
+#[test]
+fn a_deferred_close_does_not_count_as_closed_before_the_first_write() {
+    let mut w = World::new();
+    *lock(&w.fake.crypt_open) = Some(("/dev/sda3".into(), format!("luks-{UUID}")));
+    w.fake.close_only_deferred = true;
+    let e = w.install(&req("sda", "erase")).0.unwrap_err();
+    assert!(e.contains("still open"), "{e}");
+    assert!(
+        w.writes()
+            .iter()
+            .all(|l| !l.starts_with("wipefs") && !l.starts_with("sfdisk")),
+        "{:?}",
+        w.writes()
+    );
+    // after an install, a deferred close is enough: the cleanup carries on
+    let w2 = World::new();
+    let log = Log::create(&w2.env.log_path());
+    *lock(&w2.fake.crypt_open) = Some(("/dev/sda3".into(), format!("luks-{UUID}")));
+    unmount_target(&w2.fake, &log, &w2.env, Some("/dev/sda"), &[], false).unwrap();
+}
+
+#[test]
+fn encryption_needs_its_tools_before_anything_is_written() {
+    for broken in [bin::CRYPTSETUP, bin::CRYPTENROLL, bin::GRUB2_MKPASSWD] {
+        for remove in [true, false] {
+            let w = World::new();
+            let f = w.env.host(broken.trim_start_matches('/'));
+            if remove {
+                fs::remove_file(&f).unwrap();
+            } else {
+                fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            let e = w
+                .install(&enc_req("sda", "erase", "password", PASSWORD))
+                .0
+                .unwrap_err();
+            let name = broken.rsplit('/').next().unwrap();
+            assert!(e.contains(name) && e.contains("Nothing was written"), "{e}");
+            assert!(w.writes().is_empty(), "{:?}", w.writes());
+            // no encryption, no need for them
+            w.install(&req("sda", "erase")).0.unwrap();
+        }
+    }
+}
+
+#[test]
+fn the_temporary_key_never_follows_a_link() {
+    let w = World::new();
+    fs::create_dir_all(w.env.run_dir.join("luks")).unwrap();
+    let victim = w.env.run_dir.join("victim");
+    fs::write(&victim, "keep").unwrap();
+    std::os::unix::fs::symlink(&victim, w.key_path()).unwrap();
+    let key = KeyFile::create(&w.env).unwrap();
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    assert_eq!(fs::read(&key.path).unwrap().len(), 64);
+    let p = key.path.clone();
+    drop(key);
+    assert!(!p.exists());
+    assert!(victim.exists());
+    // a directory that is a link is refused
+    let w = World::new();
+    fs::create_dir_all(&w.env.run_dir).unwrap();
+    std::os::unix::fs::symlink(&w.env.root, w.env.run_dir.join("luks")).unwrap();
+    assert!(KeyFile::create(&w.env).is_err());
+}
+
+#[test]
+fn uuids_are_version_4_and_differ() {
+    let (a, b) = (new_uuid().unwrap(), new_uuid().unwrap());
+    assert_ne!(a, b);
+    for u in [&a, &b] {
+        assert!(settings::validate_uuid(u).is_ok());
+        assert_eq!(&u[14..15], "4");
+        assert!("89ab".contains(&u[19..20]));
+    }
+}
+
+const PIN: &str = "482913";
+
+#[test]
+fn tpm_with_a_pin_puts_the_pin_in_the_environment_only() {
+    let w = World::new().with_tpm();
+    let out = w
+        .install(&enc_req("sda", "free-space", "tpm-pin", PIN))
+        .0
+        .unwrap();
+    let u = w.luks_uuid();
+    let writes = w.writes_u();
+    assert_eq!(
+        root_steps(&writes),
+        [
+            "wipefs --all --quiet /dev/sda6".to_string(),
+            format!(
+                "cryptsetup luksFormat --type luks2 --batch-mode --uuid U --label atlasos --key-file {KEY} /dev/sda6"
+            ),
+            format!("cryptsetup open --allow-discards --key-file {KEY} /dev/sda6 luks-U"),
+            "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
+            format!("systemd-cryptenroll --unlock-key-file={KEY} --recovery-key /dev/sda6"),
+            format!(
+                "systemd-cryptenroll --unlock-key-file={KEY} --tpm2-device=auto --tpm2-pcrs=7 --tpm2-with-pin=yes /dev/sda6"
+            ),
+            format!("cryptsetup luksRemoveKey --key-file {KEY} /dev/sda6"),
+            format!(
+                "cryptsetup open --test-passphrase --disable-external-tokens --key-file {KEY} /dev/sda6"
+            ),
+            "cryptsetup luksDump --dump-json-metadata /dev/sda6".into(),
+            "cryptsetup open --test-passphrase --disable-external-tokens --key-file - /dev/sda6"
+                .into(),
+            "mount -o compress=zstd:1 /dev/mapper/luks-U T".into(),
+        ]
+    );
+    assert!(out.recovery_key.is_some());
+    let calls = lock(&w.fake.calls);
+    for c in calls.iter() {
+        let pin_env = c.secret_env.iter().any(|(_, v)| v == PIN);
+        assert_eq!(
+            pin_env,
+            c.args.iter().any(|a| a == "--tpm2-with-pin=yes"),
+            "{c:?}"
+        );
+        assert!(!c.args.iter().any(|a| a.contains(PIN)), "{c:?}");
+        assert!(c.stdin.as_deref() != Some(PIN), "{c:?}");
+        assert!(!format!("{c:?}").contains(PIN), "{c:?}");
+    }
+    let enroll = calls
+        .iter()
+        .find(|c| c.args.iter().any(|a| a == "--tpm2-with-pin=yes"))
+        .unwrap();
+    assert_eq!(enroll.secret_env, [("NEWPIN", PIN.to_string())]);
+    drop(calls);
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(!log.contains(PIN) && !log.contains(RECOVERY_KEY));
+    let args = w.bootc_args();
+    assert!(args.contains(&format!(
+        "rd.luks.options={u}=discard,tpm2-device=auto,tries=0"
+    )));
+    assert!(args.contains(&"vconsole.keymap=de-latin1-nodeadkeys".to_string()));
+}
+
+#[test]
+fn tpm_with_a_pin_needs_a_tpm() {
+    let w = World::new();
+    let e = w
+        .install(&enc_req("sda", "free-space", "tpm-pin", PIN))
+        .0
+        .unwrap_err();
+    assert!(e.contains("no usable security chip"), "{e}");
+}
+
+#[test]
+fn passphrase_tests_ignore_the_tpm_token_and_the_tpm_proof_uses_it() {
+    for (enc, pw) in [("tpm", ""), ("tpm-pin", PIN), ("password", PASSWORD)] {
+        let w = World::new().with_tpm();
+        w.install(&enc_req("sda", "free-space", enc, pw)).0.unwrap();
+        let calls = lock(&w.fake.calls);
+        let tests: Vec<&Cmd> = calls
+            .iter()
+            .filter(|c| c.args.iter().any(|a| a == "--test-passphrase"))
+            .collect();
+        assert!(tests.len() >= 2, "{enc}");
+        for c in tests {
+            let token_proof = c.args.iter().any(|a| a == "--token-only");
+            let no_tokens = c.args.iter().any(|a| a == "--disable-external-tokens");
+            assert!(token_proof != no_tokens, "{enc}: {c:?}");
+            if token_proof {
+                assert!(
+                    c.args
+                        .windows(2)
+                        .any(|w| w == ["--token-type", "systemd-tpm2"])
+                );
+            } else {
+                assert!(c.args.iter().any(|a| a == "--key-file"));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_boot_menu_is_locked_on_encrypted_installs_only() {
+    for (enc, pw) in [("tpm", ""), ("tpm-pin", PIN), ("password", PASSWORD)] {
+        let w = World::new().with_tpm();
+        w.install(&enc_req("sda", "free-space", enc, pw)).0.unwrap();
+        let user = w.env.target.join("boot/grub2/user.cfg");
+        assert_eq!(
+            fs::read_to_string(&user).unwrap(),
+            format!("GRUB2_PASSWORD={GRUB_HASH}\n"),
+            "{enc}"
+        );
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(fs::metadata(&user).unwrap().mode() & 0o7777, 0o600);
+        let calls = lock(&w.fake.calls);
+        let mk = calls
+            .iter()
+            .find(|c| c.name() == "grub2-mkpasswd-pbkdf2")
+            .unwrap();
+        assert!(mk.secret && mk.args.is_empty());
+        let pw_used = mk.stdin.clone().unwrap();
+        drop(calls);
+        // the random password is not kept anywhere
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        let pw64 = pw_used.lines().next().unwrap();
+        assert!(!log.contains(pw64) && !fs::read_to_string(&user).unwrap().contains(pw64));
+        // labelled with the new system's policy, with the Windows entry
+        let relabel = w
+            .writes()
+            .into_iter()
+            .rfind(|l| l.starts_with("setfiles -F -r T "))
+            .unwrap();
+        assert!(relabel.contains("T/boot/grub2/user.cfg"), "{relabel}");
+        assert!(relabel.contains("T/boot/grub2/custom.cfg"), "{relabel}");
+        let cfg = fs::read_to_string(w.env.target.join("boot/grub2/custom.cfg")).unwrap();
+        assert!(cfg.contains("--unrestricted"));
+    }
+    let w = World::new();
+    w.install(&req("sda", "free-space")).0.unwrap();
+    assert!(!w.env.target.join("boot/grub2/user.cfg").exists());
+    assert!(
+        lock(&w.fake.calls)
+            .iter()
+            .all(|c| c.name() != "grub2-mkpasswd-pbkdf2")
+    );
+}
+
+#[test]
+fn a_boot_menu_that_cannot_be_locked_fails_the_install() {
+    let mut w = World::new().with_tpm();
+    w.fake.fail = vec!["grub2-mkpasswd-pbkdf2"];
+    let e = w
+        .install(&enc_req("sda", "free-space", "tpm", ""))
+        .0
+        .unwrap_err();
+    assert!(e.starts_with("Locking the boot menu failed."), "{e}");
+    assert!(!w.env.target.join("boot/grub2/user.cfg").exists());
+    assert!(!w.key_path().exists());
+    assert!(lock(&w.fake.crypt_open).is_none());
+}
+
+#[test]
+fn secrets_are_not_in_debug_output() {
+    let w = World::new().with_tpm();
+    let out = w
+        .install(&enc_req("sda", "free-space", "tpm-pin", PIN))
+        .0
+        .unwrap();
+    let shown = format!("{out:?}");
+    assert!(
+        !shown.contains(RECOVERY_KEY) && shown.contains("<hidden>"),
+        "{shown}"
+    );
+    // but it serializes as itself, for the caller who may see it
+    assert_eq!(
+        serde_json::to_value(&out).unwrap()["recovery_key"],
+        RECOVERY_KEY
+    );
+    let c = Cmd::new(bin::CRYPTSETUP, ["x"])
+        .stdin(PASSWORD)
+        .secret_env("NEWPIN", PIN);
+    let shown = format!("{c:?}");
+    assert!(!shown.contains(PASSWORD) && !shown.contains(PIN), "{shown}");
+    let r = enc_req("sda", "erase", "tpm-pin", PIN);
+    assert!(!format!("{r:?}").contains(PIN));
+}
+
+#[test]
+fn a_failing_unmount_still_cleans_up_and_the_next_install_works() {
+    // the plain unmount fails: it is retried lazily, and the mapper closed
+    let mut w = World::new();
+    w.fake.fail = vec!["bootc"];
+    let tgt = w.env.target.display().to_string();
+    let failing = leak(format!("umount --recursive {tgt}"));
+    w.fake.fail.push(failing);
+    let e = w
+        .install(&enc_req("sda", "erase", "password", PASSWORD))
+        .0
+        .unwrap_err();
+    assert!(e.starts_with("boom") || e.contains("bootc"), "{e}");
+    assert!(!w.key_path().exists());
+    assert!(lock(&w.fake.crypt_open).is_none(), "the mapper is closed");
+    let writes = w.writes_u();
+    assert!(
+        writes.iter().any(|l| l == "umount --recursive --lazy T"),
+        "{writes:?}"
+    );
+    // everything fine now: a second encrypted install on the same machine
+    w.fake.fail.clear();
+    let out = w
+        .install(&enc_req("sda", "erase", "password", PASSWORD))
+        .0
+        .unwrap();
+    assert!(out.recovery_key.is_some());
+    assert!(!w.key_path().exists());
+
+    // even the lazy unmount fails and the mapper is busy: closed deferred
+    let mut w = World::new();
+    let tgt2 = w.env.target.display().to_string();
+    w.fake.fail = vec![
+        "bootc",
+        leak(format!("umount --recursive {tgt2}")),
+        leak(format!("umount --recursive --lazy {tgt2}")),
+        // nor can the single mounts be released
+        leak(format!("umount {tgt2}")),
+        leak(format!("umount --lazy {tgt2}")),
+        "umount --recursive /run/bootc/storage",
+        "umount --lazy /run/bootc/storage",
+    ];
+    w.install(&enc_req("sda", "erase", "password", PASSWORD))
+        .0
+        .unwrap_err();
+    assert!(
+        w.writes_u()
+            .iter()
+            .any(|l| l == "cryptsetup close --deferred luks-U"),
+        "{:?}",
+        w.writes_u()
+    );
+    assert!(!w.key_path().exists());
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(log.contains("cleanup:"), "cleanup errors are logged: {log}");
+}
+
+#[test]
+fn a_failure_can_be_retried_on_the_same_machine() {
+    for fail in [
+        "bootc",
+        "cryptsetup luksRemoveKey",
+        "systemd-cryptenroll --unlock-key-file",
+    ] {
+        for (enc, pw) in [("tpm", ""), ("password", PASSWORD)] {
+            let mut w = World::new().with_tpm();
+            w.fake.fail = vec![fail];
+            w.install(&enc_req("sda", "erase", enc, pw)).0.unwrap_err();
+            assert!(!w.key_path().exists(), "{fail} {enc}");
+            assert!(lock(&w.fake.crypt_open).is_none(), "{fail} {enc}");
+            w.fake.fail.clear();
+            w.fake.calls.lock().unwrap().clear();
+            let out = w.install(&enc_req("sda", "erase", enc, pw)).0.unwrap();
+            assert!(out.recovery_key.is_some(), "{fail} {enc}");
+            assert!(!w.key_path().exists());
+        }
+    }
+}
+
+#[test]
+fn a_failed_final_unmount_is_a_warning_and_the_volume_is_closed_when_free() {
+    let mut w = World::new();
+    let tgt = w.env.target.display().to_string();
+    w.fake.fail = vec![leak(format!("umount --recursive {tgt}"))];
+    let out = w
+        .install(&enc_req("sda", "erase", "password", PASSWORD))
+        .0
+        .unwrap();
+    assert!(
+        out.warnings
+            .iter()
+            .any(|m| m.contains("could not be unmounted"))
+    );
+    let writes = w.writes_u();
+    assert!(writes.iter().any(|l| l == "umount --recursive --lazy T"));
+    assert!(lock(&w.fake.crypt_open).is_none());
+    assert!(!w.key_path().exists());
+}
+
+#[test]
+fn only_the_installers_own_volume_is_closed_and_a_users_keeps_the_disk_busy() {
+    // lsblk where the disk's crypt volume is not ours
+    let w = World::new();
+    let mut v: serde_json::Value =
+        serde_json::from_str(&lsblk_with_crypt("/dev/sda3", &format!("luks-{UUID}"))).unwrap();
+    v["blockdevices"][0]["children"][2]["label"] = "mydata".into();
+    let l = Lsblk::parse(&v.to_string()).unwrap();
+    assert!(l.luks_mappers_on("/dev/sda").is_empty());
+    assert!(installer_core::plan::in_use(l.find("/dev/sda").unwrap()));
+    let _ = w;
+}
+
+#[test]
+fn the_listing_says_whether_secure_boot_is_on() {
+    let w = World::new();
+    let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
+    assert_eq!(v["secure_boot"], false);
+    w.put(SECURE_BOOT_VAR, &[6, 0, 0, 0, 1]);
+    let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
+    assert_eq!(v["secure_boot"], true);
+}
+
+#[test]
+fn encryption_errors_are_plain_and_point_to_the_log() {
+    for fail in [
+        "cryptsetup luksFormat",
+        "cryptsetup open --allow-discards",
+        "mkfs.btrfs",
+        "systemd-cryptenroll --unlock-key-file",
+        "cryptsetup luksAddKey",
+        "cryptsetup luksRemoveKey",
+        "cryptsetup luksDump",
+    ] {
+        let mut w = World::new();
+        w.fake.fail = vec![fail];
+        let e = w
+            .install(&enc_req("sda", "free-space", "password", PASSWORD))
+            .0
+            .unwrap_err();
+        assert!(
+            e.starts_with("Setting up encryption failed while ")
+                && e.contains("The install log has the details: ")
+                && e.contains("install.log")
+                && !e.contains("boom"),
+            "{fail}: {e}"
+        );
+    }
+    let mut w = World::new().with_tpm();
+    w.fake.fail = vec!["cryptsetup open --test-passphrase --token-only"];
+    let e = w
+        .install(&enc_req("sda", "free-space", "tpm", ""))
+        .0
+        .unwrap_err();
+    assert!(
+        e.starts_with(TPM_FAILED) && e.contains("install.log"),
+        "{e}"
+    );
+}
+
+#[test]
+fn mounts_by_another_name_of_the_device_are_released() {
+    let w = World::new();
+    let mounts = w.env.host("proc/self/mounts");
+    fs::write(
+        &mounts,
+        "/dev/dm-3 /mnt/a x rw 0 0\n\
+         /dev/disk/by-uuid/U /mnt/b x rw 0 0\n\
+         /dev/dm-3[/root] /mnt/a/c x rw 0 0\n\
+         /dev/dm-9 /mnt/other x rw 0 0\n",
+    )
+    .unwrap();
+    let canon = |d: &str| match d {
+        "/dev/mapper/luks-U" | "/dev/dm-3" => Some("/dev/dm-3".to_string()),
+        "/dev/disk/by-uuid/U" => Some("/dev/sda6".to_string()),
+        "/dev/sda6" => Some("/dev/sda6".to_string()),
+        "/dev/dm-9" => Some("/dev/dm-9".to_string()),
+        _ => None,
+    };
+    let log = Log::create(&w.env.log_path());
+    let devices = vec!["/dev/mapper/luks-U".to_string(), "/dev/sda6".to_string()];
+    release_mounts_with(&w.fake, &log, &devices, &canon);
+    let left = fs::read_to_string(&mounts).unwrap();
+    assert_eq!(left, "/dev/dm-9 /mnt/other x rw 0 0\n");
+    let umounts: Vec<String> = lock(&w.fake.calls)
+        .iter()
+        .filter(|c| c.name() == "umount")
+        .map(|c| c.args.join(" "))
+        .collect();
+    assert_eq!(
+        umounts,
+        [
+            "--recursive /mnt/a/c",
+            "--recursive /mnt/b",
+            "--recursive /mnt/a"
+        ]
+    );
+    let text = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(!text.contains("still mounted"), "{text}");
+    // nothing left: said so
+    release_mounts_with(&w.fake, &log, &devices, &canon);
+    let text = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(text.contains("no leftover mounts"), "{text}");
+}
+
+#[test]
+fn a_failed_disk_listing_still_releases_the_known_nodes() {
+    let mut w = World::new();
+    w.fake.fail = vec!["lsblk"];
+    let mounts = w.env.host("proc/self/mounts");
+    fs::write(&mounts, "/dev/sda6[/root] /run/bootc/storage x rw 0 0\n").unwrap();
+    let log = Log::create(&w.env.log_path());
+    let _ = unmount_target(
+        &w.fake,
+        &log,
+        &w.env,
+        Some("/dev/sda"),
+        &["/dev/sda6".to_string()],
+        false,
+    );
+    assert_eq!(fs::read_to_string(&mounts).unwrap(), "");
+    let text = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(text.contains("cannot list the disks"), "{text}");
+}
+
+/// The unit file must stay valid systemd syntax: one corrupted line and
+/// the helper doesn't start.
+#[test]
+fn the_service_unit_is_well_formed() {
+    let text = include_str!("../data/systemd/atlas-installer-helper.service");
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let section = line.starts_with('[') && line.ends_with(']') && line.len() > 2;
+        let key_value = line
+            .split_once('=')
+            .is_some_and(|(k, _)| !k.is_empty() && k.bytes().all(|b| b.is_ascii_alphabetic()));
+        assert!(section || key_value, "malformed unit line: {line:?}");
+    }
+    assert!(text.lines().any(|l| l == "LimitMEMLOCK=infinity"));
 }

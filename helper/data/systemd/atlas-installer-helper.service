@@ -24,3 +24,20 @@ ExecStart=/usr/libexec/atlas-installer-helper
 # when TimeoutStopSec runs out.
 KillMode=mixed
 TimeoutStopSec=60
+# The helper locks its memory (mlockall) so secrets never reach swap. Root has
+# CAP_IPC_LOCK (no CapabilityBoundingSet here); the limit is lifted for it. If
+# mlockall still fails the helper only logs a warning and carries on.
+LimitMEMLOCK=infinity
+# No core dumps (the helper holds disk passwords; main.rs also clears the
+# dumpable flag), and a few restrictions that cost the install nothing.
+# Left off on purpose: NoNewPrivileges (blocks the SELinux domain transition
+# of bootc's install_t on an enforcing system), RestrictSUIDSGID (bootc writes
+# setuid files into the target), ProtectClock (adds a DeviceAllow list, which
+# closes block-device access), ProtectKernelTunables, PrivateMounts,
+# ProtectHome and RestrictNamespaces (the mounts and bootc need them).
+# If bootc or a child ever fails with EPERM, LockPersonality, RestrictRealtime
+# and SystemCallArchitectures are the first lines to drop.
+LimitCORE=0
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native

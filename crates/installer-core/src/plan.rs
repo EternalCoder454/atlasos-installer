@@ -192,11 +192,20 @@ fn layout(
 }
 
 /// A disk with anything mounted on it (or active swap, LVM or encryption
-/// on top of it) can't be partitioned.
+/// on top of it) can't be partitioned. The installer's own unmounted
+/// `luks-<uuid>` mapping (see [`Device::installer_mappers`]) is no obstacle:
+/// the helper closes it first. Anything inside such a leftover map (LVM,
+/// another encrypted volume) deliberately still counts as in use.
 pub fn in_use(disk: &Device) -> bool {
-    disk.walk()
+    let ours: Vec<&str> = disk
+        .installer_mappers()
         .iter()
-        .any(|d| d.mounts().next().is_some() || !matches!(d.kind.as_str(), "disk" | "part"))
+        .map(|d| d.name.as_str())
+        .collect();
+    disk.walk().iter().any(|d| {
+        d.mounts().next().is_some()
+            || !(matches!(d.kind.as_str(), "disk" | "part") || ours.contains(&d.name.as_str()))
+    })
 }
 
 /// Erase the whole disk.

@@ -100,7 +100,9 @@ tests/vm/vm.py destroy t                 # removes the VM and its disks
 ```
 
 `create` also takes `--usb` (the ISO as a USB stick, not a CD), `--sata`,
-`--disk-file`, `--memory` and `--media-first` (boot the ISO before the disks).
+`--disk-file`, `--memory`, `--media-first` (boot the ISO before the disks) and
+`--tpm` (a TPM 2.0 from the swtpm emulator, which makes the installer offer
+encryption unlocked by the TPM; its state is removed by `destroy`).
 
 To try a new build without rebuilding the ISO, push the helper and its data
 files with `vm.py push`, then run `systemctl daemon-reload` and D-Bus
@@ -134,6 +136,9 @@ failed units, the firmware boot entry is called AtlasOS, and the
 | Erase, Secure Boot on | `--disk 64 --disk 30 --secure-boot`, ISO as a CD | The 30 GB disk is greyed out and can't be chosen. The CD isn't listed. The Restart page says to take out the disc. |
 | Second disk, Secure Boot off | `--disk 64 --disk 64 --usb --media-first` | The USB stick isn't listed, and the Restart page says to remove it. The two disks are told apart (by serial, or by device path when they have none). Write random data to the start and end of the first disk beforehand, and check that it is identical afterwards. |
 | Beside Windows | an overlay of the Windows base, `--sata --usb --secure-boot --media-first` | "Install alongside Windows" is the default. MSR, C: and recovery hash the same before and after, and so does `EFI/Microsoft`. The GRUB menu waits 5 s and has a Windows entry that boots Windows. |
+| Encryption, TPM | `--disk 64 --media-first --tpm` | Choose "unlock with the TPM". The recovery key is shown. After the restart the system boots without a prompt. On the installed system `cryptsetup luksDump` shows two slots and a `systemd-tpm2` token, `lsblk` shows `luks-<uuid>` under the root partition, and `/proc/cmdline` has `rd.luks.uuid`. To try the recovery key (the GRUB menu can't be edited), run `systemd-cryptenroll --wipe-slot=tpm2 <dev>` over SSH, reboot and type the recovery key at the prompt, then re-enrol the TPM. |
+| Encryption, TPM and PIN | `--disk 64 --media-first --tpm` | As for the TPM, but the PIN is asked at every boot (a wrong PIN asks again, it doesn't restart). At the GRUB menu, `e` asks for a password. The recovery key works too. |
+| Encryption, password | `--disk 64 --media-first` (no `--tpm`: the choice is not offered) | Choose a password with a non-US keyboard layout. The boot prompt takes the password in that layout, and the recovery key also unlocks. |
 | Wi-Fi | `--disk 64 --media-first`, then `tests/vm/wifi-ap.sh <vm>` and restart the UI | Connect to AtlasTest (password atlastest123). The installed system has the keyfile (without `interface-name=`), and connects when `wifi-ap.sh <vm> ssh` brings the access point up there. |
 
 The Windows base is `build/vm/win11-base.qcow2`, made once by

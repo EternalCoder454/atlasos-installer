@@ -3,6 +3,7 @@
 //! system, and progress. No I/O happens here; `atlas-installer-helper` runs
 //! the commands and hands their output in, and the unit tests use fixtures.
 
+pub mod crypt;
 pub mod disks;
 pub mod efi;
 pub mod grub;

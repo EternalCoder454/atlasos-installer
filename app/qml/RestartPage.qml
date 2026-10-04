@@ -16,6 +16,9 @@ InstallerPage {
     readonly property var backend: page.app.backend
     readonly property var result: JSON.parse(page.backend.resultJson)
     readonly property string mok: page.result.mokPassword || ""
+    readonly property string recoveryKey: page.result.recoveryKey || ""
+    // The key was shown to be written down: Restart waits for the tick.
+    property bool keySaved: false
 
     title: qsTr("AtlasOS is installed")
     // Afterwards, not before: the helper restarts without the stick, but the
@@ -25,7 +28,7 @@ InstallerPage {
             : qsTr("Restart, then take out the USB stick or disc you started from.")
     backVisible: false
     primaryText: page.backend.rebooting ? qsTr("Restarting…") : qsTr("Restart")
-    primaryEnabled: !page.backend.rebooting
+    primaryEnabled: !page.backend.rebooting && (page.recoveryKey.length === 0 || page.keySaved)
     onPrimary: page.backend.reboot()
 
     QQC2.ScrollView {
@@ -49,6 +52,75 @@ InstallerPage {
                       + (page.mok.length > 0
                          ? qsTr("Once AtlasOS starts, you'll create your account.")
                          : qsTr("After the restart, you'll create your account."))
+            }
+
+            Section {
+                visible: page.recoveryKey.length > 0
+                title: qsTr("Recovery key")
+                footer: qsTr("AtlasOS can't show it again after the restart.")
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.margins: Kirigami.Units.gridUnit
+                    spacing: Kirigami.Units.largeSpacing
+
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: qsTr("Write it down or take a photo with your phone, and keep it away from this PC. You need it if AtlasOS ever asks for it, for example after a firmware or security-chip change, or if the disk moves to another PC.")
+                    }
+                    Rectangle {
+                        Layout.alignment: Qt.AlignHCenter
+                        implicitWidth: Math.min(keyColumn.implicitWidth + Kirigami.Units.gridUnit * 2, parent.width)
+                        implicitHeight: keyColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
+                        radius: 8
+                        color: Qt.alpha(Kirigami.Theme.highlightColor, 0.12)
+                        ColumnLayout {
+                            id: keyColumn
+                            anchors.centerIn: parent
+                            spacing: Kirigami.Units.smallSpacing
+                            Repeater {
+                                model: page.result.recoveryRows || []
+                                TextEdit {
+                                    required property string modelData
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: modelData
+                                    readOnly: true
+                                    selectByMouse: true
+                                    color: Kirigami.Theme.textColor
+                                    selectionColor: Kirigami.Theme.highlightColor
+                                    selectedTextColor: Kirigami.Theme.highlightedTextColor
+                                    font.family: "monospace"
+                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
+                                    font.weight: Font.DemiBold
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: qsTr("Recovery key, part")
+                                    Accessible.description: modelData.split("-").join(", ")
+                                }
+                            }
+                        }
+                    }
+                    // Atlas.Ui's switch, as on the Disk page: Breeze's
+                    // check box is a near-invisible square in AtlasOS Dark,
+                    // and this one gates Restart.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.largeSpacing
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: savedSwitch.Accessible.name
+                            TapHandler {
+                                onTapped: savedSwitch.toggle()
+                            }
+                        }
+                        AtlasSwitch {
+                            id: savedSwitch
+                            onCheckedChanged: page.keySaved = checked
+                            Accessible.name: qsTr("I've saved my recovery key")
+                        }
+                    }
+                }
             }
 
             Section {

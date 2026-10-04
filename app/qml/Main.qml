@@ -39,6 +39,33 @@ QQC2.ApplicationWindow {
     property var disk: null
     // "erase" or "free-space"
     property string mode: ""
+    // Disk encryption: "" until the user touches the switch (then the PC's
+    // TPM decides), else "on" or "off". `encryptPin`: with a TPM, also ask
+    // for a PIN at start-up. The start-up password or PIN lives only here,
+    // while the user types it: it is handed to Install and wiped.
+    property string encryptChoice: ""
+    // Same for the PIN: "" lets the PC decide (a PIN when there is a TPM but
+    // Secure Boot is off), else "on" or "off".
+    property string pinChoice: ""
+    readonly property bool encryptPin: root.pinChoice === "" ? root.backend.pinDefault(root.backend.tpm2, root.backend.secureBootOff) : root.pinChoice === "on"
+    // Why Install was refused, shown on the Review page.
+    property string installRefusal: ""
+    property string password: ""
+    property string passwordConfirm: ""
+    readonly property bool encrypt: root.encryptChoice === "" ? root.backend.encryptionDefault(root.backend.tpm2) : root.encryptChoice === "on"
+    readonly property string encryption: root.backend.encryptionMode(root.backend.tpm2, root.encrypt, root.encryptPin)
+    // A password or PIN is typed for these.
+    readonly property bool needsSecret: root.encryption === "password" || root.encryption === "tpm-pin"
+    // Continue on the Disk page: a password or PIN, if one is needed, is valid.
+    readonly property bool encryptionReady: !root.needsSecret || root.backend.secretOk(root.encryption, root.password, root.passwordConfirm)
+    // Not kept for a disk that isn't encrypted with it, and a password that
+    // was typed must never silently become the PIN (or the other way round).
+    onEncryptionChanged: root.wipePassword()
+
+    function wipePassword() {
+        root.password = "";
+        root.passwordConfirm = "";
+    }
 
     readonly property var wifi: JSON.parse(root.backend.wifiJson)
     // No adapter, or a cable: nothing to set up. Decided once, at the first
@@ -88,6 +115,10 @@ QQC2.ApplicationWindow {
             return;
         }
         const forward = root.allIndex(key) > root.allIndex(root.current);
+        if (root.current === "disk" && !forward) {
+            root.wipePassword();
+        }
+        root.installRefusal = "";
         root.current = key;
         root.reached = Math.max(root.reached, root.allIndex(key));
         stack.replaceCurrentItem(root.pages[key], {}, forward ? QQC2.StackView.PushTransition : QQC2.StackView.PopTransition);
@@ -122,8 +153,20 @@ QQC2.ApplicationWindow {
             root.chooseDiskAgain();
             return;
         }
+        if (!root.encryptionReady) {
+            root.show("disk");
+            return;
+        }
+        root.installRefusal = "";
+        const accepted = root.backend.install(root.disk.id, root.disk.fingerprint, root.mode, root.language, root.keymap, root.wifiUuid, root.encryption, root.needsSecret ? root.password : "");
+        if (!accepted) {
+            // The password stays, so the user can try again.
+            root.show("review");
+            root.installRefusal = root.installState !== "idle" ? qsTr("An install is already running, or the PC is restarting.") : qsTr("AtlasOS couldn't start the install with these choices. Go back and check the disk and the password or PIN, then try again.");
+            return;
+        }
+        root.wipePassword();
         root.show("progress");
-        root.backend.install(root.disk.id, root.disk.fingerprint, root.mode, root.language, root.keymap, root.wifiUuid);
     }
 
     // After a failed install, or when the disk changed: back to the Disk step.
@@ -152,6 +195,10 @@ QQC2.ApplicationWindow {
             return;
         }
         root.demoPage = "";
+        if (root.backend.demoEncrypt) {
+            root.encryptChoice = "on";
+        }
+        root.pinChoice = root.backend.demoPin ? "on" : "";
         const disks = JSON.parse(root.backend.disksJson);
         if (disks.length > 0 && target !== "disk") {
             root.disk = disks[0];

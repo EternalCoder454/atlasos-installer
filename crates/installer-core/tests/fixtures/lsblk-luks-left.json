@@ -1,0 +1,173 @@
+{
+ "blockdevices": [
+  {
+   "name": "/dev/sda",
+   "kname": "/dev/sda",
+   "type": "disk",
+   "size": 137438953472,
+   "ro": false,
+   "rm": false,
+   "hotplug": false,
+   "tran": "sata",
+   "model": "QEMU HARDDISK",
+   "mountpoints": [
+    null
+   ],
+   "pttype": "gpt",
+   "log-sec": 512,
+   "children": [
+    {
+     "name": "/dev/sda1",
+     "kname": "/dev/sda1",
+     "type": "part",
+     "size": 629145600,
+     "fstype": "vfat",
+     "mountpoints": [
+      null
+     ],
+     "pttype": "gpt",
+     "log-sec": 512
+    },
+    {
+     "name": "/dev/sda3",
+     "kname": "/dev/sda3",
+     "type": "part",
+     "size": 100000000000,
+     "fstype": "crypto_LUKS",
+     "uuid": "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f",
+     "mountpoints": [
+      null
+     ],
+     "pttype": "gpt",
+     "log-sec": 512,
+     "children": [
+      {
+       "name": "/dev/mapper/luks-0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f",
+       "kname": "/dev/dm-0",
+       "type": "crypt",
+       "size": 99990000000,
+       "fstype": "btrfs",
+       "mountpoints": [
+        null
+       ],
+       "log-sec": 512
+      }
+     ],
+     "label": "atlasos"
+    }
+   ]
+  },
+  {
+   "name": "/dev/sdb",
+   "kname": "/dev/sdb",
+   "type": "disk",
+   "size": 137438953472,
+   "mountpoints": [
+    null
+   ],
+   "log-sec": 512,
+   "children": [
+    {
+     "name": "/dev/sdb1",
+     "kname": "/dev/sdb1",
+     "type": "part",
+     "size": 100000000000,
+     "fstype": "crypto_LUKS",
+     "mountpoints": [
+      null
+     ],
+     "log-sec": 512,
+     "children": [
+      {
+       "name": "/dev/mapper/luks-1b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f",
+       "kname": "/dev/dm-1",
+       "type": "crypt",
+       "mountpoints": [
+        "/mnt"
+       ]
+      },
+      {
+       "name": "/dev/mapper/home",
+       "kname": "/dev/dm-2",
+       "type": "crypt",
+       "mountpoints": [
+        null
+       ]
+      },
+      {
+       "name": "/dev/mapper/luks-nonsense",
+       "kname": "/dev/dm-3",
+       "type": "crypt",
+       "mountpoints": [
+        null
+       ]
+      }
+     ],
+     "label": "backup"
+    }
+   ]
+  },
+  {
+   "name": "/dev/sdc",
+   "type": "disk",
+   "size": 137438953472,
+   "mountpoints": [
+    null
+   ],
+   "log-sec": 512,
+   "children": [
+    {
+     "name": "/dev/sdc1",
+     "type": "part",
+     "size": 1,
+     "fstype": "crypto_LUKS",
+     "label": "atlasos",
+     "mountpoints": [
+      null
+     ],
+     "children": [
+      {
+       "name": "/dev/mapper/luks-2b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8c",
+       "kname": "/dev/dm-9",
+       "type": "crypt",
+       "mountpoints": [
+        "/mnt"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "/dev/sdd",
+   "type": "disk",
+   "size": 137438953472,
+   "mountpoints": [
+    null
+   ],
+   "log-sec": 512,
+   "children": [
+    {
+     "name": "/dev/sdd1",
+     "type": "part",
+     "size": 1,
+     "fstype": "crypto_LUKS",
+     "label": "other",
+     "mountpoints": [
+      null
+     ],
+     "children": [
+      {
+       "name": "/dev/mapper/luks-2b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8d",
+       "kname": "/dev/dm-9",
+       "type": "crypt",
+       "mountpoints": [
+        null
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

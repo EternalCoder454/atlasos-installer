@@ -145,6 +145,19 @@ impl Security {
         }
     }
 
+    /// How strict a network's security is, for telling apart access points
+    /// that share a name: the strictest one speaks for the name.
+    fn rank(self) -> u8 {
+        match self {
+            Security::Open => 0,
+            Security::Owe => 1,
+            Security::Wep => 2,
+            Security::Psk => 3,
+            Security::Sae => 4,
+            Security::Enterprise => 5,
+        }
+    }
+
     pub fn needs_password(self) -> bool {
         matches!(self, Security::Wep | Security::Psk | Security::Sae)
     }
@@ -164,6 +177,64 @@ pub fn ssid_from_hex(hex: &str) -> Option<Vec<u8>> {
     (0..hex.len() / 2)
         .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok())
         .collect()
+}
+
+/// The longest name shown, in characters.
+const NAME_MAX_CHARS: usize = 64;
+
+/// Characters that are not text to read: format characters (Cf) such as
+/// bidi controls and zero-width ones. Rust's std has no category lookup.
+fn is_format_char(c: char) -> bool {
+    matches!(c as u32,
+        0xAD | 0x600..=0x605 | 0x61C | 0x6DD | 0x70F | 0x890 | 0x891 | 0x8E2 | 0x180E
+        | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F
+        | 0xFEFF | 0xFFF9..=0xFFFB | 0x110BD | 0x110CD | 0x13430..=0x1343F
+        | 0x1BCA0..=0x1BCA3 | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
+}
+
+/// A name from the air made safe to show: control and format characters
+/// (newlines aside, which are spaces) become U+FFFD, runs of whitespace
+/// become one space, the ends are trimmed, and it is cut at 64 characters
+/// with an ellipsis. May be empty.
+pub fn sanitize_name(name: &str) -> String {
+    // at most 32 bytes arrive here from the air, so no size concern
+    let mut out = String::new();
+    let mut space = false;
+    for c in name.chars() {
+        if c.is_whitespace() {
+            space = !out.is_empty();
+            continue;
+        }
+        if space {
+            out.push(' ');
+            space = false;
+        }
+        out.push(if c.is_control() || is_format_char(c) {
+            '\u{fffd}'
+        } else {
+            c
+        });
+    }
+    if out.chars().count() > NAME_MAX_CHARS {
+        let keep: String = out.chars().take(NAME_MAX_CHARS - 1).collect();
+        out = format!("{}\u{2026}", keep.trim_end());
+    }
+    out
+}
+
+/// The name shown for an SSID's bytes. A name with nothing readable in it
+/// (only replacement characters)
+/// shows its bytes in hex; one that is only spaces or NULs stays empty (the
+/// network is left out, as hidden ones are).
+pub fn display_name(raw: &[u8]) -> String {
+    if raw.iter().all(|b| *b == 0 || b.is_ascii_whitespace()) {
+        return String::new();
+    }
+    let n = sanitize_name(&String::from_utf8_lossy(raw));
+    if n.chars().all(|c| c == '\u{fffd}') {
+        return sanitize_name(&ssid_hex(raw));
+    }
+    n
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -194,7 +265,8 @@ pub struct WifiState {
     pub active_uuid: String,
 }
 
-/// One entry per name, the strongest first, the connected one on top.
+/// One entry per name (with the strictest security among its access
+/// points), the strongest first, the connected one on top.
 /// Hidden networks (no name) are left out.
 pub fn merge(aps: Vec<Network>) -> Vec<Network> {
     let mut out: Vec<Network> = Vec::new();
@@ -206,8 +278,10 @@ pub fn merge(aps: Vec<Network>) -> Vec<Network> {
         match out.iter_mut().find(|n| n.ssid_hex == ap.ssid_hex) {
             Some(n) => {
                 n.active |= ap.active;
-                if ap.strength > n.strength {
-                    n.strength = ap.strength;
+                n.strength = n.strength.max(ap.strength);
+                // The strictest speaks for the name: a stronger open access
+                // point with a WPA network's name must not make it look open.
+                if ap.security.rank() > n.security.rank() {
                     n.security = ap.security;
                 }
             }
@@ -337,7 +411,7 @@ pub async fn state(scan: bool) -> Result<WifiState, String> {
             continue;
         };
         aps.push(Network {
-            ssid: String::from_utf8_lossy(&ssid).into_owned(),
+            ssid: display_name(&ssid),
             ssid_hex: ssid_hex(&ssid),
             strength,
             security: Security::from_flags(flags, wpa, rsn),
@@ -356,12 +430,13 @@ pub async fn state(scan: bool) -> Result<WifiState, String> {
         if ac.as_str() != "/" {
             let a = active(&c, &ac).await.map_err(err)?;
             st.active_uuid = a.uuid().await.map_err(err)?;
+            let id = a.id().await.map_err(err)?;
             st.active_ssid = st
                 .networks
                 .iter()
                 .find(|n| n.active)
                 .map(|n| n.ssid.clone())
-                .unwrap_or(a.id().await.map_err(err)?);
+                .unwrap_or_else(|| sanitize_name(&id));
         }
     }
     Ok(st)
@@ -479,6 +554,16 @@ pub fn hidden_security(choice: &str, password: &str) -> Security {
     }
 }
 
+/// The access point to connect to among those with one name: the strongest
+/// of those with the strictest security (the one the list shows), so an
+/// open lookalike never wins over the secured network.
+fn pick_ap<T>(aps: Vec<(u8, Security, T)>) -> Option<(u8, Security, T)> {
+    let top = aps.iter().map(|a| a.1.rank()).max()?;
+    aps.into_iter()
+        .filter(|a| a.1.rank() == top)
+        .max_by_key(|a| a.0)
+}
+
 /// Connects and waits until NetworkManager says it worked. Returns the
 /// new connection's UUID. A failed connection is deleted again. `ssid` is
 /// the network's bytes; `hidden` is the security chosen for a network that
@@ -488,7 +573,7 @@ pub async fn connect(
     password: &str,
     hidden: Option<Security>,
 ) -> Result<String, String> {
-    let name = String::from_utf8_lossy(ssid).into_owned();
+    let name = display_name(ssid);
     let c = conn().await?;
     let (Some(dev), _) = devices(&c).await? else {
         return Err("There is no Wi-Fi adapter.".into());
@@ -497,7 +582,7 @@ pub async fn connect(
         (s, None)
     } else {
         let w = wireless(&c, &dev).await.map_err(err)?;
-        let mut best: Option<(u8, Security, OwnedObjectPath)> = None;
+        let mut found: Vec<(u8, Security, OwnedObjectPath)> = Vec::new();
         for p in w.get_all_access_points().await.map_err(err)? {
             let Ok(ap) = AccessPointProxy::builder(&c)
                 .path(p.clone())
@@ -516,11 +601,11 @@ pub async fn connect(
             ) else {
                 continue;
             };
-            if s == ssid && best.as_ref().is_none_or(|b| st > b.0) {
-                best = Some((st, Security::from_flags(f, wpa, rsn), p));
+            if s == ssid {
+                found.push((st, Security::from_flags(f, wpa, rsn), p));
             }
         }
-        let Some((_, s, p)) = best else {
+        let Some((_, s, p)) = pick_ap(found) else {
             return Err(format!("{name} is out of range."));
         };
         (s, Some(p))
@@ -737,6 +822,61 @@ mod tests {
             security: Security::Psk,
             active,
         }
+    }
+
+    #[test]
+    fn names_are_made_safe_to_show() {
+        assert_eq!(sanitize_name("Caf\u{e9} \u{1f4f6}"), "Caf\u{e9} \u{1f4f6}");
+        assert_eq!(sanitize_name("  a \n\t b\r\n"), "a b");
+        assert_eq!(sanitize_name("a\0b"), "a\u{fffd}b");
+        assert_eq!(sanitize_name("gpj\u{202e}no"), "gpj\u{fffd}no");
+        assert_eq!(
+            sanitize_name("a\u{2066}b\u{200b}c\u{200f}d\u{61c}"),
+            "a\u{fffd}b\u{fffd}c\u{fffd}d\u{fffd}"
+        );
+        assert_eq!(sanitize_name("\n \t"), "");
+        let long = sanitize_name(&"x".repeat(200));
+        assert_eq!(long.chars().count(), 64);
+        assert!(long.ends_with('\u{2026}'));
+        assert_eq!(sanitize_name(&"y".repeat(64)), "y".repeat(64));
+    }
+
+    #[test]
+    fn display_names_fall_back_to_hex() {
+        assert_eq!(display_name(b"Home"), "Home");
+        assert_eq!(display_name("\u{200b}".as_bytes()), "e2808b");
+        assert_eq!(display_name(&[0, 0]), "");
+        assert_eq!(display_name(b"  "), "");
+        assert_eq!(display_name(b"a\nb"), "a b");
+    }
+
+    #[test]
+    fn a_secured_access_point_makes_the_name_secured() {
+        let ap = |strength, security| Network {
+            security,
+            ..n("Cafe", strength, false)
+        };
+        let m = merge(vec![
+            ap(90, Security::Open),
+            ap(30, Security::Psk),
+            ap(50, Security::Open),
+        ]);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].security, Security::Psk);
+        assert_eq!(m[0].strength, 90);
+        let m = merge(vec![ap(20, Security::Enterprise), ap(80, Security::Psk)]);
+        assert_eq!(m[0].security, Security::Enterprise);
+    }
+
+    #[test]
+    fn connecting_picks_among_the_strictest_access_points() {
+        let aps = vec![
+            (90, Security::Open, "open"),
+            (30, Security::Psk, "weak"),
+            (60, Security::Psk, "strong"),
+        ];
+        assert_eq!(pick_ap(aps).map(|a| a.2), Some("strong"));
+        assert_eq!(pick_ap::<()>(Vec::new()), None);
     }
 
     #[test]

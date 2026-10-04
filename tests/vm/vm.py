@@ -2,7 +2,7 @@
 """Test VMs for the installer, in the system libvirt (qemu:///system).
 
     vm.py create <name> --iso PATH [--usb] [--disk GB ...] [--secure-boot] [--media-first]
-                 [--disk-file PATH ...] [--memory MB] [--sata]
+                 [--disk-file PATH ...] [--memory MB] [--sata] [--tpm]
     vm.py exec <name> <shell command>      run as root in the guest, print output
     vm.py ssh <name> <shell command>       run as root over SSH (installed systems)
     vm.py push <name> <local> <guest path> [--mode 755]   copy a file in
@@ -10,7 +10,9 @@
     vm.py shot <name> <out.png>            screenshot the display
     vm.py destroy <name>                   stop and remove the VM and its disks
 
-Every VM is UEFI (OVMF), 8 GB RAM, 4 CPUs, virtio video without 3D (so
+--tpm adds a TPM 2.0 (swtpm emulator, CRB), so the installer offers
+encryption unlocked by the TPM (without it the VM has none); its state lives with the VM and goes with
+`destroy`. Every VM is UEFI (OVMF), 8 GB RAM, 4 CPUs, virtio video without 3D (so
 `virsh screenshot` can read it), a serial console and the guest agent
 channel. Names are prefixed "atlasinst-", and disks live in build/vm/, so
 nothing else in libvirt is ever touched. Commands run through the QEMU guest
@@ -63,6 +65,8 @@ def create(a: argparse.Namespace) -> None:
         "--serial", "pty", "--console", "pty,target_type=serial",
         "--noautoconsole", "--import",
     ]
+    # virt-install adds a TPM to every UEFI VM unless told not to
+    cmd += ["--tpm", "backend.type=emulator,backend.version=2.0,model=tpm-crb" if a.tpm else "none"]
     bus = "sata" if a.sata else "virtio"
     # disks boot first unless --media-first (a disk with Windows on it would
     # boot instead of the installer)
@@ -190,6 +194,7 @@ def main() -> None:
     c.add_argument("--disk-file", action="append", default=[], help="an existing disk image")
     c.add_argument("--secure-boot", action="store_true")
     c.add_argument("--media-first", action="store_true", help="boot the ISO before the disks")
+    c.add_argument("--tpm", action="store_true", help="add a TPM 2.0 (swtpm emulator)")
     c.add_argument("--memory", type=int, default=8192)
     c.add_argument("--sata", action="store_true", help="target disks on SATA, not virtio (Windows has no virtio driver)")
     c.set_defaults(fn=create)

@@ -1,6 +1,9 @@
 //! Atlas Installer, Rust side. `cpp/` only starts Qt and loads the QML;
 //! everything QML talks to is the `Backend` QObject in `backend.rs`.
 
+// Install takes everything the helper does, as QML hands it over.
+#![allow(clippy::too_many_arguments)]
+
 mod backend;
 mod demo;
 mod helper;

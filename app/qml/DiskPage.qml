@@ -20,7 +20,7 @@ InstallerPage {
 
     title: qsTr("Where should AtlasOS go?")
     subtitle: qsTr("Choose a disk, then how to install on it.")
-    primaryEnabled: page.diskState === "ready" && page.modeOk
+    primaryEnabled: page.diskState === "ready" && page.modeOk && page.app.encryptionReady
     onPrimary: page.app.next()
     onBack: page.app.previous()
 
@@ -200,6 +200,76 @@ InstallerPage {
                     kind: "warning"
                     text: page.disk ? page.disk.note : ""
                 }
+            }
+
+            Section {
+                id: encryptionSection
+                visible: page.diskState === "ready" && page.disk !== null && page.app.mode !== ""
+                title: qsTr("Encryption")
+                footer: page.app.encryption === "none" ? "" : qsTr("At start-up and when AtlasOS asks for the recovery key, you type with the keyboard layout you chose earlier.")
+
+                SectionRow {
+                    iconName: "lock"
+                    title: qsTr("Encrypt this disk")
+                    subtitle: page.backend.tpm2 ? qsTr("AtlasOS unlocks the disk by itself when this PC starts. Your files stay unreadable if the disk is taken out of this PC, or if the PC is sold or recycled. You'll get a recovery key at the end.") : qsTr("This PC has no security chip (TPM 2.0), so you'd type a password every time it starts.")
+                    showSwitch: true
+                    switchChecked: page.app.encrypt
+                    onSwitchToggled: checked => page.app.encryptChoice = checked ? "on" : "off"
+                }
+
+                SectionRow {
+                    visible: page.backend.tpm2 && page.app.encrypt
+                    iconName: "input-dialpad-symbolic"
+                    title: qsTr("Ask for a PIN when this PC starts")
+                    subtitle: qsTr("Protects your files if the whole PC is stolen: nobody can start AtlasOS without the PIN.")
+                    showSwitch: true
+                    switchChecked: page.app.encryptPin
+                    onSwitchToggled: checked => page.app.pinChoice = checked ? "on" : "off"
+                }
+
+                ColumnLayout {
+                    id: secretBox
+                    visible: page.app.needsSecret
+                    Layout.fillWidth: true
+                    Layout.margins: Kirigami.Units.largeSpacing
+                    spacing: Kirigami.Units.largeSpacing
+
+                    readonly property bool pin: page.app.encryption === "tpm-pin"
+
+                    Kirigami.PasswordField {
+                        id: secretField
+                        Layout.fillWidth: true
+                        placeholderText: secretBox.pin ? qsTr("PIN") : qsTr("Password")
+                        Accessible.name: placeholderText
+                        text: page.app.password
+                        onTextChanged: page.app.password = text
+                        onAccepted: confirmField.forceActiveFocus()
+                    }
+                    Kirigami.PasswordField {
+                        id: confirmField
+                        Layout.fillWidth: true
+                        placeholderText: secretBox.pin ? qsTr("Confirm PIN") : qsTr("Confirm password")
+                        Accessible.name: placeholderText
+                        text: page.app.passwordConfirm
+                        onTextChanged: page.app.passwordConfirm = text
+                    }
+                    QQC2.Label {
+                        readonly property string problem: page.backend.secretHint(page.app.encryption, page.app.password, page.app.passwordConfirm)
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        font: Kirigami.Theme.smallFont
+                        text: problem.length > 0 ? problem : secretBox.pin ? qsTr("Use at least 6 characters: letters without accents, numbers, spaces and symbols. At start-up, type it where it asks for the \"LUKS2 token PIN\". If you forget it, the recovery key opens the disk.") : qsTr("Use at least 8 characters: letters without accents, numbers, spaces and symbols. Write it down somewhere safe: if you forget it, only the recovery key opens the disk.")
+                        color: problem.length > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+                        opacity: problem.length > 0 ? 1 : 0.65
+                    }
+                }
+            }
+
+            Note {
+                Layout.fillWidth: true
+                visible: encryptionSection.visible && page.backend.tpm2 && page.app.encrypt && page.backend.secureBootOff
+                kind: "warning"
+                text: qsTr("Secure Boot is off on this PC. Turn it on in the firmware settings for full protection.")
             }
 
             Item {

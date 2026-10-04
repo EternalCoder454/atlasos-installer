@@ -31,7 +31,7 @@ pub mod action {
 /// What Status reports. `result` is the Install JSON once it is done; it
 /// carries the MOK password, so it is shown only to a caller that may
 /// install (see `Service::status`) and never logged.
-#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[derive(Clone, serde::Serialize, PartialEq)]
 pub struct Status {
     /// `idle`, `installing`, `done` or `failed`.
     pub state: &'static str,
@@ -40,6 +40,20 @@ pub struct Status {
     pub text: String,
     pub result: Option<serde_json::Value>,
     pub error: Option<String>,
+}
+
+/// `result` holds secrets, so `Debug` never shows it.
+impl std::fmt::Debug for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Status")
+            .field("state", &self.state)
+            .field("step", &self.step)
+            .field("fraction", &self.fraction)
+            .field("text", &self.text)
+            .field("result", &self.result.as_ref().map(|_| "<hidden>"))
+            .field("error", &self.error)
+            .finish()
+    }
 }
 
 impl Status {
@@ -218,6 +232,9 @@ pub struct Service {
     status: Arc<Mutex<Status>>,
 }
 
+/// The fields of Install's result only a caller who may install without
+/// being asked gets to see.
+const SECRETS: [&str; 2] = ["mok_password", "recovery_key"];
 const SHUTTING_DOWN: &str = "the helper is shutting down, try again";
 const BUSY: &str = "AtlasOS is being installed, or the computer is restarting";
 
@@ -245,15 +262,16 @@ impl Service {
         }
     }
 
-    /// The work behind Status, without polkit (tests). The MOK password is
-    /// left out of the result unless `with_secret`.
+    /// The work behind Status, without polkit (tests). The MOK password and
+    /// the recovery key are left out of the result unless `with_secret`.
     pub fn do_status(&self, with_secret: bool) -> Result<String, HelperError> {
         let mut st = lock(&self.status).clone();
-        if !with_secret
-            && let Some(serde_json::Value::Object(o)) = st.result.as_mut()
-            && o.get("mok_password").is_some_and(|v| !v.is_null())
-        {
-            o.insert("mok_password".into(), serde_json::Value::Null);
+        if !with_secret && let Some(serde_json::Value::Object(o)) = st.result.as_mut() {
+            for key in SECRETS {
+                if o.get(key).is_some_and(|v| !v.is_null()) {
+                    o.insert(key.into(), serde_json::Value::Null);
+                }
+            }
         }
         serde_json::to_string(&st).map_err(|e| HelperError::Failed(e.to_string()))
     }
@@ -450,7 +468,8 @@ impl Service {
 
 #[zbus::interface(name = "net.eterneon.atlas.InstallerHelper1")]
 impl Service {
-    /// JSON: `{"disks": [...], "hidden": [...]}` (installer-core's DiskList).
+    /// JSON: `{"disks": [...], "hidden": [...], "tpm2": bool}` (installer-core's
+    /// DiskList, and whether a usable TPM 2.0 exists).
     async fn list_disks(
         &self,
         #[zbus(header)] header: Header<'_>,
@@ -466,6 +485,8 @@ impl Service {
     /// unless it still has the `fingerprint` ListDisks gave.
     /// `mode`: `erase` or `free-space`. `keymap`: `de` or `de(nodeadkeys)`.
     /// `wifi_uuid`: a NetworkManager connection to carry over, or empty.
+    /// `encryption`: `none`, `tpm`, `tpm-pin` or `password`; `password` is the
+    /// disk password or PIN for the last two, empty otherwise.
     /// Emits Progress while it runs; returns the Outcome as JSON.
     #[allow(clippy::too_many_arguments)]
     async fn install(
@@ -476,10 +497,15 @@ impl Service {
         locale: String,
         keymap: String,
         wifi_uuid: String,
+        encryption: String,
+        password: String,
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &zbus::Connection,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> Result<String, HelperError> {
+        // the String from D-Bus becomes a Secret at once, so it is wiped
+        // when dropped
+        let password = crate::install::Secret::from(password);
         let _guard = self.begin()?;
         self.authorize(&header, conn, action::INSTALL).await?;
         if fingerprint.is_empty() {
@@ -487,8 +513,23 @@ impl Service {
                 "the disk's fingerprint from ListDisks is required".into(),
             ));
         }
-        let req = Request::new(&disk_id, &fingerprint, &mode, &locale, &keymap, &wifi_uuid)
-            .map_err(HelperError::InvalidArgument)?;
+        let req = Request::new(
+            &disk_id,
+            &fingerprint,
+            &mode,
+            &locale,
+            &keymap,
+            &wifi_uuid,
+            &encryption,
+            password.as_str(),
+        )
+        .map_err(HelperError::InvalidArgument);
+        // req carries its own copy: wipe this one now, not after the install.
+        // Not wiped, by design: the outcome (recovery key) stays in Status so
+        // a restarted UI can still show it. std's Command keeps its own copy
+        // of a child's env that can't be wiped; mlock and non-dumpable cover it.
+        drop(password);
+        let req = req?;
         // A task of its own: the install and its Progress signals go on
         // even if this call is dropped (the caller crashed or disconnected).
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -519,7 +560,8 @@ impl Service {
 
     /// The install's state, JSON: `{"state": "idle"|"installing"|"done"|
     /// "failed", "step", "fraction", "text", "result", "error"}`. `result`
-    /// is Install's answer once done; its `mok_password` is null unless the
+    /// is Install's answer once done; its `mok_password` and `recovery_key` are
+    /// null unless the
     /// caller may install without being asked.
     async fn status(
         &self,
@@ -656,7 +698,7 @@ mod tests {
         let s = Service::new(Arc::new(Nothing), Env::system());
         assert_eq!(status_of(&s, true)["state"], "idle");
         // a failing install: recorded as failed, with the reason, and pinned
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         let r = s.do_install(req, async { None }, |_, _, _| {}).await;
         assert!(r.is_err());
         let st = status_of(&s, true);
@@ -666,7 +708,7 @@ mod tests {
         assert!(!s.activity.close_if_idle(Duration::ZERO, Instant::now()));
         // a refused install (busy) leaves the recorded state alone
         s.busy.store(true, Ordering::Release);
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         assert!(
             s.do_install(req, async { None }, |_, _, _| {})
                 .await
@@ -678,7 +720,7 @@ mod tests {
     #[tokio::test]
     async fn a_failure_stays_until_the_disks_are_listed_again() {
         let s = Service::new(Arc::new(Nothing), Env::system());
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         assert!(
             s.do_install(req, async { None }, |_, _, _| {})
                 .await
@@ -698,7 +740,7 @@ mod tests {
             result: Some(serde_json::json!({"mok_password": "12345678"})),
             ..Status::idle()
         };
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         let r = s.do_install(req, async { None }, |_, _, _| {}).await;
         assert!(matches!(r, Err(HelperError::Busy(_))), "{r:?}");
         assert!(!s.busy.load(Ordering::Acquire));
@@ -728,27 +770,43 @@ mod tests {
                 bad
             })
         };
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         let _ = s.do_install(req, async { None }, |_, _, _| {}).await;
         assert!(!watcher.await.unwrap(), "busy released while installing");
         assert_eq!(status_of(&s, true)["state"], "failed");
     }
 
     #[test]
-    fn status_hides_the_mok_password_from_callers_who_may_not_install() {
+    fn status_hides_the_mok_password_and_recovery_key_from_callers_who_may_not_install() {
         let s = Service::new(Arc::new(Nothing), Env::system());
         *lock(&s.status) = Status {
             state: "done",
             step: "finish".into(),
             fraction: 1.0,
             text: "Done".into(),
-            result: Some(serde_json::json!({"mok_password": "12345678", "warnings": []})),
+            result: Some(serde_json::json!({
+                "mok_password": "12345678",
+                "recovery_key": "ulcbjnni-ehtlcfnl",
+                "warnings": [],
+            })),
             error: None,
         };
-        assert_eq!(status_of(&s, true)["result"]["mok_password"], "12345678");
+        let shown = status_of(&s, true);
+        assert_eq!(shown["result"]["mok_password"], "12345678");
+        assert_eq!(shown["result"]["recovery_key"], "ulcbjnni-ehtlcfnl");
         let hidden = status_of(&s, false);
         assert!(hidden["result"]["mok_password"].is_null());
-        assert!(!s.do_status(false).unwrap().contains("12345678"));
+        assert!(hidden["result"]["recovery_key"].is_null());
+        let text = s.do_status(false).unwrap();
+        assert!(!text.contains("12345678") && !text.contains("ulcbjnni"));
+        assert_eq!(hidden["result"]["warnings"], serde_json::json!([]));
+        // an install without them still answers, with the fields as they are
+        *lock(&s.status) = Status {
+            state: "done",
+            result: Some(serde_json::json!({"mok_password": null, "recovery_key": null})),
+            ..Status::idle()
+        };
+        assert!(status_of(&s, false)["result"]["recovery_key"].is_null());
         assert_eq!(hidden["state"], "done");
     }
 
@@ -764,7 +822,7 @@ mod tests {
         let s = Service::new(Arc::new(Nothing), Env::system());
         s.busy.store(true, Ordering::Release);
         assert!(matches!(s.do_list_disks().await, Err(HelperError::Busy(_))));
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         assert!(matches!(
             s.do_install(req.clone(), async { None }, |_, _, _| {})
                 .await,
@@ -795,7 +853,7 @@ mod tests {
             run_dir: dir.path().join("run"),
         };
         let s = Arc::new(Service::new(Arc::new(Slow), env));
-        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "").unwrap();
+        let req = Request::new("sda", "", "erase", "en_US.UTF-8", "us", "", "none", "").unwrap();
         let (a, b, c) = tokio::join!(
             s.do_list_disks(),
             s.do_list_disks(),

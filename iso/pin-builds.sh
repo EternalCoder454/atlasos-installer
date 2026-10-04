@@ -29,7 +29,7 @@ for nvr; do
 	while read -r name arch; do
 		f=$name-$ver-$rel.$arch.rpm
 		echo "$f"
-		curl -fsSL --retry 3 -o "$dir/$f" \
+		curl -fsSL --retry 3 --proto '=https' --tlsv1.2 -o "$dir/$f" \
 			"https://kojipkgs.fedoraproject.org/packages/$src/$ver/$rel/data/signed/$key/$arch/$f"
 	done <<<"$pkgs"
 done

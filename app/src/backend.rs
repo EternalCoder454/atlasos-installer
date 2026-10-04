@@ -34,6 +34,14 @@ pub mod qobject {
         #[qproperty(QString, wifi_uuid, cxx_name = "wifiUuid")]
         #[qproperty(bool, secure_boot, cxx_name = "secureBoot")]
         #[qproperty(bool, nvidia)]
+        /// This PC has a usable TPM 2.0 (from ListDisks).
+        #[qproperty(bool, tpm2)]
+        /// ListDisks says Secure Boot is off on this PC.
+        #[qproperty(bool, secure_boot_off, cxx_name = "secureBootOff")]
+        /// Demo mode: open with the start-up PIN switched on.
+        #[qproperty(bool, demo_pin, cxx_name = "demoPin")]
+        /// Demo mode: open with "Encrypt this disk" turned on.
+        #[qproperty(bool, demo_encrypt, cxx_name = "demoEncrypt")]
         /// The smallest disk, as the Disk page says it ("40 GB").
         #[qproperty(QString, min_disk_size, cxx_name = "minDiskSize")]
         /// "idle", "running", "done" or "failed".
@@ -85,6 +93,39 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "applyKeymap"]
         fn apply_keymap(self: &Backend, keymap: &QString);
+        /// "none", "tpm", "tpm-pin" or "password" (view::encryption_mode).
+        #[qinvokable]
+        #[cxx_name = "encryptionMode"]
+        fn encryption_mode(self: &Backend, tpm2: bool, on: bool, pin: bool) -> QString;
+        /// The Review page's text for an encryption mode.
+        #[qinvokable]
+        #[cxx_name = "reviewEncryption"]
+        fn review_encryption(self: &Backend, mode: &QString) -> QString;
+        /// Encryption is on unless the user says otherwise, if this PC has a TPM.
+        #[qinvokable]
+        #[cxx_name = "encryptionDefault"]
+        fn encryption_default(self: &Backend, tpm2: bool) -> bool;
+        /// Whether the PIN switch starts on: with a TPM but Secure Boot off.
+        #[qinvokable]
+        #[cxx_name = "pinDefault"]
+        fn pin_default(self: &Backend, tpm2: bool, secure_boot_off: bool) -> bool;
+        /// The password (mode "password") or PIN (mode "tpm-pin") is valid
+        /// and typed twice the same.
+        #[qinvokable]
+        #[cxx_name = "secretOk"]
+        fn secret_ok(self: &Backend, mode: &QString, secret: &QString, confirm: &QString) -> bool;
+        /// What is wrong with it, or "".
+        #[qinvokable]
+        #[cxx_name = "secretHint"]
+        fn secret_hint(
+            self: &Backend,
+            mode: &QString,
+            secret: &QString,
+            confirm: &QString,
+        ) -> QString;
+        /// `encryption`: "none", "tpm", "tpm-pin" or "password". `password`
+        /// is the password, or the PIN, for those two modes only; it is not kept.
+        /// Returns whether the install was accepted (false: nothing started).
         #[qinvokable]
         fn install(
             self: Pin<&mut Backend>,
@@ -94,7 +135,9 @@ pub mod qobject {
             locale: &QString,
             keymap: &QString,
             wifi_uuid: &QString,
-        );
+            encryption: &QString,
+            password: &QString,
+        ) -> bool;
         /// After a failed install: back to choosing a disk.
         #[qinvokable]
         #[cxx_name = "resetInstall"]
@@ -189,6 +232,7 @@ async fn follow_status(
     flags: Option<Flags>,
     progress: impl Fn(f64, String),
     lost: Option<helper::Error>,
+    encryption: &str,
 ) -> Result<view::Done, helper::Error> {
     let give_up = |e: helper::Error| lost.clone().unwrap_or(e);
     let mut misses = 0;
@@ -209,7 +253,7 @@ async fn follow_status(
                 misses = 0;
                 progress(fraction, text);
             }
-            Ok(view::Follow::Done(d)) => return Ok(d),
+            Ok(view::Follow::Done(d)) => return Ok(view::require_key(d, encryption)),
             Ok(view::Follow::Failed(m)) => return Err(helper::Error::new(m)),
             Ok(view::Follow::Gone) => {
                 return Err(give_up(helper::Error::new(
@@ -245,6 +289,10 @@ pub struct BackendRust {
     wifi_uuid: QString,
     secure_boot: bool,
     nvidia: bool,
+    tpm2: bool,
+    secure_boot_off: bool,
+    demo_pin: bool,
+    demo_encrypt: bool,
     min_disk_size: QString,
     install_state: QString,
     progress: f64,
@@ -288,6 +336,10 @@ impl Default for BackendRust {
             wifi_uuid: QString::default(),
             secure_boot: false,
             nvidia: false,
+            tpm2: false,
+            secure_boot_off: false,
+            demo_pin: false,
+            demo_encrypt: false,
             min_disk_size: q(&view::min_disk_size()),
             install_state: q("idle"),
             progress: 0.0,
@@ -329,6 +381,9 @@ impl qobject::Backend {
             Some(f) => {
                 self.as_mut().set_secure_boot(f.mok);
                 self.as_mut().set_nvidia(f.mok);
+                self.as_mut().set_tpm2(!f.notpm);
+                self.as_mut().set_demo_encrypt(f.encrypt);
+                self.as_mut().set_demo_pin(f.pin);
             }
             None => {
                 self.as_mut().set_secure_boot(system::secure_boot());
@@ -411,7 +466,8 @@ impl qobject::Backend {
                         let _ = qt_progress
                             .queue(move |mut obj| obj.as_mut().on_progress(fraction, &text));
                     };
-                    let r = guarded(follow_status(flags, progress, None), helper_err).await;
+                    // the mode is unknown here: the helper's outcome carries it
+                    let r = guarded(follow_status(flags, progress, None, ""), helper_err).await;
                     let _ = qt.queue(move |mut obj| obj.as_mut().finish_install(r));
                 });
             }
@@ -470,8 +526,10 @@ impl qobject::Backend {
             )
             .await;
             let r = r.and_then(|json| {
+                let tpm2 = view::tpm2_of(&json);
+                let sb_off = view::secure_boot_off(&json);
                 serde_json::from_str::<installer_core::disks::DiskList>(&json)
-                    .map(|l| view::disk_rows(&l))
+                    .map(|l| (view::disk_rows(&l), tpm2, sb_off))
                     .map_err(|e| {
                         helper_err(format!("The installer service gave a bad answer: {e}"))
                     })
@@ -487,9 +545,14 @@ impl qobject::Backend {
         });
     }
 
-    fn apply_disks(mut self: Pin<&mut Self>, r: Result<Vec<view::DiskRow>, helper::Error>) {
+    fn apply_disks(
+        mut self: Pin<&mut Self>,
+        r: Result<(Vec<view::DiskRow>, bool, bool), helper::Error>,
+    ) {
         match r {
-            Ok(rows) => {
+            Ok((rows, tpm2, sb_off)) => {
+                self.as_mut().set_tpm2(tpm2);
+                self.as_mut().set_secure_boot_off(sb_off);
                 let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into());
                 self.as_mut().set_disks_json(q(&json));
                 self.as_mut().set_disks_state(q("ready"));
@@ -642,6 +705,34 @@ impl qobject::Backend {
         });
     }
 
+    pub fn encryption_mode(&self, tpm2: bool, on: bool, pin: bool) -> QString {
+        q(view::encryption_mode(tpm2, on, pin))
+    }
+
+    pub fn review_encryption(&self, mode: &QString) -> QString {
+        q(view::review_encryption(&mode.to_string()))
+    }
+
+    pub fn encryption_default(&self, tpm2: bool) -> bool {
+        view::encryption_default(tpm2)
+    }
+
+    pub fn pin_default(&self, tpm2: bool, secure_boot_off: bool) -> bool {
+        view::pin_default(tpm2, secure_boot_off)
+    }
+
+    pub fn secret_ok(&self, mode: &QString, secret: &QString, confirm: &QString) -> bool {
+        view::secret_ok(&mode.to_string(), &secret.to_string(), &confirm.to_string())
+    }
+
+    pub fn secret_hint(&self, mode: &QString, secret: &QString, confirm: &QString) -> QString {
+        q(&view::secret_hint(
+            &mode.to_string(),
+            &secret.to_string(),
+            &confirm.to_string(),
+        ))
+    }
+
     pub fn install(
         mut self: Pin<&mut Self>,
         disk_id: &QString,
@@ -650,17 +741,44 @@ impl qobject::Backend {
         locale: &QString,
         keymap: &QString,
         wifi_uuid: &QString,
-    ) {
+        encryption: &QString,
+        password: &QString,
+    ) -> bool {
         if self.install_state().to_string() != "idle" || *self.rebooting() {
-            return;
+            return false;
         }
-        let args = [disk_id, fingerprint, mode, locale, keymap, wifi_uuid].map(|s| s.to_string());
+        let args = [
+            disk_id,
+            fingerprint,
+            mode,
+            locale,
+            keymap,
+            wifi_uuid,
+            encryption,
+            password,
+        ]
+        .map(|s| s.to_string());
         // QML checks these too; the helper checks them again.
         if args[..5].iter().any(|a| a.is_empty())
             || !matches!(args[2].as_str(), "erase" | "free-space")
         {
             eprintln!("atlas-installer: refusing to install with {:?}", &args[..5]);
-            return;
+            return false;
+        }
+        // The password or PIN goes to the helper for those modes only, and
+        // only if it is one the helper accepts. Never printed.
+        let password_ok = match args[6].as_str() {
+            "none" | "tpm" => args[7].is_empty(),
+            "password" => view::password_problem(&args[7]).is_none(),
+            "tpm-pin" => view::pin_problem(&args[7]).is_none(),
+            _ => false,
+        };
+        if !password_ok {
+            eprintln!(
+                "atlas-installer: refusing to install with encryption {:?}",
+                args[6]
+            );
+            return false;
         }
         self.as_mut().set_install_error(QString::default());
         self.as_mut().set_install_began(false);
@@ -679,6 +797,7 @@ impl qobject::Backend {
         self.as_mut().set_time_left(q(&left));
         self.as_mut().set_install_state(q("running"));
 
+        let encryption = args[6].clone();
         let flags = self.rust().flags.clone();
         let qt = self.qt_thread();
         let qt_progress = qt.clone();
@@ -697,16 +816,31 @@ impl qobject::Backend {
                         // Install succeeded even if its answer can't be
                         // read: never offer to install again over a
                         // finished system.
-                        Ok(json) => {
-                            Ok(
-                                view::done_from_outcome(&json).unwrap_or_else(|m| view::Done {
-                                    warnings: vec![format!(
-                                        "The installer's report couldn't be read ({m})."
-                                    )],
-                                    ..Default::default()
-                                }),
-                            )
-                        }
+                        Ok(json) => Ok(match view::done_from_outcome(&json) {
+                            Ok(d) => view::require_key(d, &encryption),
+                            // The answer is unreadable, but Status gives an
+                            // authorised caller the same outcome, key included.
+                            Err(m) => {
+                                let st = match &flags {
+                                    Some(f) => Ok(demo::status(f)),
+                                    None => helper::status().await,
+                                };
+                                match st.ok().and_then(|j| view::reattach(&j).ok()) {
+                                    Some(view::Reattach::Done(d)) => {
+                                        view::require_key(d, &encryption)
+                                    }
+                                    _ => view::require_key(
+                                        view::Done {
+                                            warnings: vec![format!(
+                                                "The installer's report couldn't be read ({m})."
+                                            )],
+                                            ..Default::default()
+                                        },
+                                        &encryption,
+                                    ),
+                                }
+                            }
+                        }),
                         // The call was lost, not refused: the install may
                         // be going on. Ask the helper until it says.
                         // Busy: the helper is already installing (an
@@ -717,7 +851,7 @@ impl qobject::Backend {
                                     obj.as_mut().on_progress(fraction, &text)
                                 });
                             };
-                            follow_status(flags.clone(), progress, Some(e)).await
+                            follow_status(flags.clone(), progress, Some(e), &encryption).await
                         }
                         Err(e) => Err(e),
                     }
@@ -727,6 +861,7 @@ impl qobject::Backend {
             .await;
             let _ = qt.queue(move |mut obj| obj.as_mut().finish_install(r));
         });
+        true
     }
 
     fn on_progress(mut self: Pin<&mut Self>, fraction: f64, text: &str) {

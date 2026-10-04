@@ -1,0 +1,17 @@
+[KDE Action Restrictions][$i]
+# Behind the shortcut allow list (kglobalaccelrc): no terminal, no run
+# dialog and no log-out in the installer's session, whatever else a key or a
+# crash dialog would offer. Merged with the image's /etc/xdg/kdeglobals, so
+# the AtlasOS colours and font stay.
+# KAuthorized reads some of these as "key" and some as "action/key",
+# so each is set under both.
+shell_access=false
+action/shell_access=false
+run_command=false
+action/run_command=false
+logout=false
+action/logout=false
+lock_screen=false
+action/lock_screen=false
+switch_user=false
+action/switch_user=false

@@ -123,6 +123,26 @@ pub fn x11_keyboard_conf(k: &Keymap) -> String {
     s
 }
 
+/// `/etc/atlasos/installer.ini`: what the installer already asked, so
+/// AtlasOS's first-run wizard (plasma-setup) can skip those pages. `network`
+/// is true when a Wi-Fi connection was carried over or the PC was on a
+/// cable; the wizard still shows its Wi-Fi page when it finds itself offline.
+/// The locale and keymap are validated, so neither can hold a newline.
+pub fn installer_ini(locale: &str, k: &Keymap, network: bool) -> String {
+    format!(
+        "# Written by Atlas Installer. AtlasOS's first-run wizard reads it to\n\
+         # skip the questions the installer already asked.\n\
+         [Installer]\n\
+         Version=1\n\
+         Language={locale}\n\
+         KeyboardLayout={}\n\
+         KeyboardVariant={}\n\
+         Network={network}\n",
+        k.layout,
+        k.variant.as_deref().unwrap_or("")
+    )
+}
+
 /// A NetworkManager connection UUID (lower-case 8-4-4-4-12 hex).
 pub fn validate_uuid(s: &str) -> Result<(), String> {
     let groups: Vec<&str> = s.split('-').collect();
@@ -266,6 +286,20 @@ mod tests {
         assert!(x.contains("        Option \"XkbVariant\" \"nodeadkeys\"\n"));
         assert!(x.ends_with("EndSection\n"));
         assert!(!x11_keyboard_conf(&Keymap::parse("us").unwrap()).contains("XkbVariant"));
+
+        let ini = installer_ini("de_DE.UTF-8", &k, true);
+        assert!(
+            ini.ends_with(
+                "[Installer]\nVersion=1\nLanguage=de_DE.UTF-8\nKeyboardLayout=de\n\
+                 KeyboardVariant=nodeadkeys\nNetwork=true\n"
+            ),
+            "{ini}"
+        );
+        let ini = installer_ini("en_GB.UTF-8", &Keymap::parse("gb").unwrap(), false);
+        assert!(
+            ini.ends_with("KeyboardLayout=gb\nKeyboardVariant=\nNetwork=false\n"),
+            "{ini}"
+        );
     }
 
     #[test]

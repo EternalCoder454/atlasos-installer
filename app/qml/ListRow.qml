@@ -111,6 +111,7 @@ FocusScope {
             QQC2.Label {
                 Layout.fillWidth: true
                 text: row.title
+                maximumLineCount: 1
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
                 font.weight: row.selected ? Font.DemiBold : Font.Normal

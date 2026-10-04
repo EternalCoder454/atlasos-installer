@@ -19,6 +19,10 @@
 //! | `fast` | The install takes 2 seconds instead of 20 |
 //! | `running` | The helper is already installing, at 42 %: the UI starts on the Progress page and follows it (as after a crash) |
 //! | `finished` | The helper has finished installing: the UI starts on the Restart page (`mok`, `warn` and `cd` apply) |
+//! | `notpm` | This PC has no TPM 2.0: encryption needs a password |
+//! | `nosb` | Secure Boot is off on this PC (with a TPM, the PIN switch then starts on) |
+//! | `pin` | The Disk page opens with the start-up PIN switched on (with a TPM) |
+//! | `encrypt` | The Disk page opens with "Encrypt this disk" turned on |
 //! | `cd` | Started from a disc, not a USB stick (the Restart page's wording) |
 //!
 //! `ATLAS_INSTALLER_DEMO_PAGE=<step>` opens at a step (welcome, keyboard,
@@ -49,18 +53,53 @@ pub struct Flags {
     pub cd: bool,
     pub running: bool,
     pub finished: bool,
+    pub notpm: bool,
+    pub encrypt: bool,
+    pub nosb: bool,
+    pub pin: bool,
 }
 
 /// `None` unless `ATLAS_INSTALLER_DEMO` is set (and not empty or `0`).
 /// Never on the installer media: a fake install there would tell the user
 /// AtlasOS is installed when it isn't.
 pub fn from_env() -> Option<Flags> {
-    let f = parse(&std::env::var("ATLAS_INSTALLER_DEMO").ok()?)?;
-    if crate::system::live_session() {
+    // Decided once: main.cpp and the Backend both ask, and a refusal is
+    // logged only the first time.
+    static DECIDED: std::sync::OnceLock<Option<Flags>> = std::sync::OnceLock::new();
+    DECIDED
+        .get_or_init(|| {
+            let v = std::env::var("ATLAS_INSTALLER_DEMO").ok()?;
+            let f = parse(&v)?;
+            decide(f, crate::system::live_session())
+        })
+        .clone()
+}
+
+/// Flags only if this isn't the live session.
+fn decide(f: Flags, live: bool) -> Option<Flags> {
+    if live {
         eprintln!("atlas-installer: ignoring ATLAS_INSTALLER_DEMO in the live session");
         return None;
     }
     Some(f)
+}
+
+/// The step the demo opens at, for `main.cpp`: empty unless demo mode is
+/// on and allowed, so a refused demo never reaches the QML.
+pub fn page_from_env() -> String {
+    if from_env().is_none() {
+        return String::new();
+    }
+    std::env::var("ATLAS_INSTALLER_DEMO_PAGE").unwrap_or_default()
+}
+
+/// Called once from `main.cpp`: [`page_from_env`] as a C string that lives
+/// for the whole run.
+#[unsafe(no_mangle)]
+pub extern "C" fn atlas_demo_page() -> *const std::ffi::c_char {
+    static PAGE: std::sync::OnceLock<std::ffi::CString> = std::sync::OnceLock::new();
+    PAGE.get_or_init(|| std::ffi::CString::new(page_from_env()).unwrap_or_default())
+        .as_ptr()
 }
 
 pub fn parse(v: &str) -> Option<Flags> {
@@ -87,6 +126,10 @@ pub fn parse(v: &str) -> Option<Flags> {
             "finished" => f.finished = true,
             "warn" => f.warn = true,
             "fast" => f.fast = true,
+            "notpm" => f.notpm = true,
+            "encrypt" => f.encrypt = true,
+            "nosb" => f.nosb = true,
+            "pin" => f.pin = true,
             _ => {}
         }
     }
@@ -98,17 +141,21 @@ pub async fn list_disks(f: &Flags) -> Result<String, helper::Error> {
     if f.busy {
         return Err(helper::describe("net.eterneon.atlas.Error.Busy", None));
     }
-    if f.nodisks {
-        return Ok(r#"{"disks":[],"hidden":[]}"#.into());
-    }
     let all = include_str!("../fixtures/disks.json");
-    let keep = match (f.emptydisk || f.twins, f.onedisk) {
-        (true, _) => "sda",
-        (_, true) => "nvme0n1",
-        _ => return Ok(all.into()),
-    };
     let mut list: serde_json::Value = serde_json::from_str(all).expect("fixture");
-    if let Some(disks) = list["disks"].as_array_mut() {
+    list["tpm2"] = (!f.notpm).into();
+    list["secure_boot"] = (!f.nosb).into();
+    if f.nodisks {
+        list["disks"] = serde_json::json!([]);
+        list["hidden"] = serde_json::json!([]);
+        return Ok(list.to_string());
+    }
+    let keep = match (f.emptydisk || f.twins, f.onedisk) {
+        (true, _) => Some("sda"),
+        (_, true) => Some("nvme0n1"),
+        _ => None,
+    };
+    if let (Some(keep), Some(disks)) = (keep, list["disks"].as_array_mut()) {
         disks.retain(|d| d["id"] == keep);
         if f.twins
             && let Some(first) = disks.first_mut()
@@ -266,6 +313,10 @@ pub fn status(f: &Flags) -> String {
     }
 }
 
+/// A made-up recovery key, so the Restart page's card can be shown.
+const DEMO_RECOVERY_KEY: &str =
+    "kqzvtnhw-bjmcpdre-xsfagyul-ewnqtkzh-dpcrvbjm-ayuxsgfl-tzhkwqne-mjbdrpcv";
+
 /// Install's answer.
 fn outcome(f: &Flags) -> String {
     let done = Done {
@@ -282,6 +333,8 @@ fn outcome(f: &Flags) -> String {
             Vec::new()
         },
         log: "/run/atlas-installer/install.log".into(),
+        recovery_key: String::new(),
+        recovery_rows: Vec::new(),
     };
     serde_json::json!({
         "mok_password": if done.mok_password.is_empty() { None } else { Some(done.mok_password) },
@@ -289,6 +342,8 @@ fn outcome(f: &Flags) -> String {
         "boot_media": done.boot_media,
         "warnings": done.warnings,
         "log": done.log,
+        "recovery_key": if f.encrypt { Some(DEMO_RECOVERY_KEY) } else { None },
+        "encryption": if f.encrypt { "tpm" } else { "none" },
     })
     .to_string()
 }
@@ -296,6 +351,13 @@ fn outcome(f: &Flags) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn demo_is_refused_in_the_live_session() {
+        let f = parse("wired").unwrap();
+        assert_eq!(decide(f.clone(), true), None);
+        assert_eq!(decide(f.clone(), false), Some(f));
+    }
 
     #[test]
     fn flags() {
@@ -314,9 +376,13 @@ mod tests {
         assert_eq!(state("1")["state"], "idle");
         assert_eq!(state("running")["state"], "installing");
         assert_eq!(state("running")["fraction"], 0.42);
-        let done = state("finished,mok");
+        let done = state("finished,mok,encrypt");
         assert_eq!(done["state"], "done");
         assert_eq!(done["result"]["mok_password"], "48201937");
+        assert_eq!(
+            done["result"]["recovery_key"].as_str().map(str::len),
+            Some(71)
+        );
         // and the UI reads what the demo says
         assert_eq!(
             crate::view::reattach(&status(&parse("finished").unwrap()))
@@ -324,6 +390,22 @@ mod tests {
                 .page(),
             "restart"
         );
+    }
+
+    #[tokio::test]
+    async fn the_disk_list_says_whether_there_is_a_tpm() {
+        let tpm2 = |flags: &str| {
+            let f = parse(flags).unwrap();
+            async move {
+                let json = list_disks(&f).await.unwrap();
+                serde_json::from_str::<serde_json::Value>(&json).unwrap()["tpm2"].as_bool()
+            }
+        };
+        assert_eq!(tpm2("1").await, Some(true));
+        assert_eq!(tpm2("notpm").await, Some(false));
+        assert_eq!(tpm2("nodisks").await, Some(true));
+        let list = list_disks(&parse("nosb").unwrap()).await.unwrap();
+        assert!(crate::view::secure_boot_off(&list));
     }
 
     #[test]

@@ -59,6 +59,10 @@ grub=$(echo /rootfs/usr/lib/efi/grub2/*/EFI)
 cp "$shim/BOOT/BOOTX64.EFI" "$shim/fedora/mmx64.efi" "$grub/fedora/grubx64.efi" "$work/efi/EFI/BOOT/"
 cp "$shim/fedora/shimx64.efi" "$shim/fedora/mmx64.efi" "$grub/fedora/grubx64.efi" "$work/efi/EFI/fedora/"
 
+# enforcing=0: the live root comes from a container image whose files carry no
+# SELinux labels (live/build.sh, DRACUT_NO_XATTR), so enforcing would leave
+# nearly everything unlabeled_t. The installed system boots enforcing; the
+# helper builds its own kernel arguments and never copies these.
 args="root=live:CDLABEL=$ISO_LABEL rd.live.image enforcing=0 quiet rhgb"
 cat >"$work/grub.cfg" <<EOF
 set default=0

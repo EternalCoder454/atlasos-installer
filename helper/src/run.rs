@@ -13,7 +13,11 @@ use std::time::{Duration, Instant};
 /// /usr/sbin into /usr/bin).
 pub mod bin {
     pub const BOOTC: &str = "/usr/bin/bootc";
+    pub const CRYPTENROLL: &str = "/usr/bin/systemd-cryptenroll";
+    pub const CRYPTSETUP: &str = "/usr/bin/cryptsetup";
     pub const EFIBOOTMGR: &str = "/usr/bin/efibootmgr";
+    pub const GRUB2_MKPASSWD: &str = "/usr/bin/grub2-mkpasswd-pbkdf2";
+    pub const FINDMNT: &str = "/usr/bin/findmnt";
     pub const LSBLK: &str = "/usr/bin/lsblk";
     pub const MKFS_BTRFS: &str = "/usr/bin/mkfs.btrfs";
     pub const MKFS_EXT4: &str = "/usr/bin/mkfs.ext4";
@@ -41,11 +45,14 @@ const KILL_WAIT: Duration = Duration::from_secs(10);
 /// How much of stderr goes into an error message.
 const ERROR_TAIL: usize = 2048;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Cmd {
     pub program: &'static str,
     pub args: Vec<String>,
     pub stdin: Option<String>,
+    /// Environment variables that hold a secret (the runner's environment
+    /// is otherwise empty). Never logged or shown by `Debug`.
+    pub secret_env: Vec<(&'static str, String)>,
     pub timeout: Duration,
     /// The arguments or stdin hold a secret: the arguments are not logged
     /// (stdin never is).
@@ -64,6 +71,7 @@ impl Cmd {
             program,
             args: args.into_iter().map(Into::into).collect(),
             stdin: None,
+            secret_env: Vec::new(),
             timeout: DEFAULT_TIMEOUT,
             secret: false,
             cleanup: false,
@@ -72,6 +80,12 @@ impl Cmd {
 
     pub fn stdin(mut self, s: impl Into<String>) -> Cmd {
         self.stdin = Some(s.into());
+        self
+    }
+
+    /// Set a secret environment variable for this command.
+    pub fn secret_env(mut self, name: &'static str, value: impl Into<String>) -> Cmd {
+        self.secret_env.push((name, value.into()));
         self
     }
 
@@ -105,6 +119,49 @@ impl Cmd {
                 .collect::<Vec<_>>()
                 .join(" ")
         }
+    }
+}
+
+/// Overwrite a string's bytes before it is freed. Volatile writes and a fence
+/// keep the compiler from dropping them as dead stores.
+pub fn wipe(s: String) {
+    let mut bytes = s.into_bytes();
+    for b in bytes.iter_mut() {
+        // SAFETY: `b` is a valid, aligned, exclusive reference
+        unsafe { std::ptr::write_volatile(b, 0) };
+    }
+    std::sync::atomic::compiler_fence(Ordering::SeqCst);
+    drop(bytes);
+}
+
+/// The secrets in stdin and the environment are wiped when the command goes.
+impl Drop for Cmd {
+    fn drop(&mut self) {
+        if let Some(s) = self.stdin.take() {
+            wipe(s);
+        }
+        for (_, v) in std::mem::take(&mut self.secret_env) {
+            wipe(v);
+        }
+    }
+}
+
+/// Stdin and secret variables are never shown, whatever they hold.
+impl std::fmt::Debug for Cmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hidden = |present: bool| if present { "<hidden>" } else { "<none>" };
+        f.debug_struct("Cmd")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("stdin", &hidden(self.stdin.is_some()))
+            .field(
+                "secret_env",
+                &self.secret_env.iter().map(|(k, _)| *k).collect::<Vec<_>>(),
+            )
+            .field("timeout", &self.timeout)
+            .field("secret", &self.secret)
+            .field("cleanup", &self.cleanup)
+            .finish()
     }
 }
 
@@ -235,9 +292,26 @@ fn read_lines(r: impl Read, tx: mpsc::Sender<(bool, Event)>, is_err: bool) {
     let mut buf = Vec::new();
     loop {
         buf.clear();
-        match r.read_until(b'\n', &mut buf) {
+        // At most LINE_CAP + 1 bytes are held per line; the rest of a longer
+        // line is read and dropped up to its newline.
+        match (&mut r)
+            .take(LINE_CAP as u64 + 1)
+            .read_until(b'\n', &mut buf)
+        {
             Ok(0) | Err(_) => break,
             Ok(_) => {
+                if buf.len() > LINE_CAP && buf.last() != Some(&b'\n') {
+                    // over the cap with no newline yet: skip to the next one
+                    let mut skip = Vec::new();
+                    loop {
+                        skip.clear();
+                        match (&mut r).take(LINE_CAP as u64).read_until(b'\n', &mut skip) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) if skip.last() == Some(&b'\n') => break,
+                            Ok(_) => {}
+                        }
+                    }
+                }
                 buf.truncate(LINE_CAP);
                 let line = String::from_utf8_lossy(&buf)
                     .trim_end_matches(['\n', '\r'])
@@ -283,6 +357,7 @@ impl Runner for SystemRunner {
             .env_clear()
             .env("PATH", "/usr/bin")
             .env("LANG", "C.UTF-8")
+            .envs(cmd.secret_env.iter().map(|(k, v)| (*k, v.as_str())))
             .stdin(if cmd.stdin.is_some() {
                 Stdio::piped()
             } else {
@@ -314,9 +389,13 @@ fn supervise(
     cmd: &Cmd,
     on_line: &mut dyn FnMut(Option<&str>),
 ) -> Result<Output, String> {
-    if let (Some(input), Some(mut pipe)) = (cmd.stdin.clone(), child.stdin.take()) {
+    // the writer outlives this call, so it needs its own copy; it wipes it
+    if let Some(mut pipe) = child.stdin.take()
+        && let Some(input) = cmd.stdin.clone()
+    {
         std::thread::spawn(move || {
             let _ = pipe.write_all(input.as_bytes());
+            wipe(input);
         });
     }
     let (tx, rx) = mpsc::channel();
@@ -413,6 +492,38 @@ mod tests {
     }
 
     #[test]
+    fn a_huge_line_is_cut_without_being_held_and_the_next_line_survives() {
+        let mut input = vec![b'x'; LINE_CAP * 5 + 17];
+        input.extend_from_slice(b"\nshort\r\n");
+        input.extend(vec![b'y'; LINE_CAP + 1]);
+        input.extend_from_slice(b"\nlast");
+        let (tx, rx) = mpsc::channel();
+        read_lines(std::io::Cursor::new(input), tx, false);
+        let lines: Vec<String> = rx
+            .iter()
+            .filter_map(|(_, e)| match e {
+                Event::Line(l) => Some(l),
+                Event::Closed => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "x".repeat(LINE_CAP));
+        assert_eq!(lines[1], "short");
+        assert_eq!(lines[2], "y".repeat(LINE_CAP));
+        assert_eq!(lines[3], "last");
+    }
+
+    #[test]
+    fn a_newline_free_stream_is_one_capped_line() {
+        let (tx, rx) = mpsc::channel();
+        read_lines(std::io::repeat(b'z').take(LINE_CAP as u64 * 40), tx, true);
+        let lines: Vec<_> = rx.iter().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(matches!(&lines[0].1, Event::Line(l) if l.len() == LINE_CAP));
+        assert!(matches!(lines[1].1, Event::Closed));
+    }
+
+    #[test]
     fn lines_arrive_as_printed_and_output_is_kept() {
         let mut lines = Vec::new();
         let out = SystemRunner
@@ -483,6 +594,21 @@ mod tests {
     fn shutdown_leaves_a_running_cleanup_alone() {
         let running = HashMap::from([(10, false), (11, true), (12, false)]);
         assert_eq!(to_terminate(&running), [10, 12]);
+    }
+
+    #[test]
+    fn secret_variables_reach_the_command_but_not_debug() {
+        let c = Sh::cmd("echo \"$NEWPIN|$HOME\"; cat")
+            .secret_env("NEWPIN", "hunter2hunter2")
+            .stdin("stdinsecret");
+        let out = SystemRunner.run(&c, &mut |_| {}).unwrap();
+        assert_eq!(out.stdout, "hunter2hunter2|\nstdinsecret\n");
+        let shown = format!("{c:?}");
+        assert!(
+            !shown.contains("hunter2") && !shown.contains("stdinsecret"),
+            "{shown}"
+        );
+        assert!(shown.contains("NEWPIN"));
     }
 
     #[test]

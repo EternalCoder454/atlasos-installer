@@ -1,12 +1,26 @@
 // The live session's user installs, and sets up Wi-Fi, without a password.
 // Whoever is at the keyboard booted the ISO and owns the computer; an
-// installed system has no such user.
+// installed system has no such user. Only the actions the installer uses are
+// granted: its own three, and the NetworkManager ones the Wi-Fi page needs
+// (scan, add and activate a system connection, delete a failed one, turn the
+// radio on). A new helper action has to be added here on purpose.
+var allowed = [
+    "net.eterneon.atlas.installer.list-disks",
+    "net.eterneon.atlas.installer.install",
+    "net.eterneon.atlas.installer.reboot",
+    "org.freedesktop.NetworkManager.network-control",
+    "org.freedesktop.NetworkManager.settings.modify.system",
+    "org.freedesktop.NetworkManager.settings.modify.own",
+    "org.freedesktop.NetworkManager.wifi.scan",
+    "org.freedesktop.NetworkManager.enable-disable-wifi",
+    "org.freedesktop.NetworkManager.enable-disable-network",
+];
+
 polkit.addRule(function (action, subject) {
     if (subject.user !== "atlas-installer" || !subject.local || !subject.active) {
         return polkit.Result.NOT_HANDLED;
     }
-    if (action.id.indexOf("net.eterneon.atlas.installer.") === 0 ||
-        action.id.indexOf("org.freedesktop.NetworkManager.") === 0) {
+    if (allowed.indexOf(action.id) >= 0) {
         return polkit.Result.YES;
     }
     return polkit.Result.NOT_HANDLED;

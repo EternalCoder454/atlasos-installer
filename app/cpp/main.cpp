@@ -9,6 +9,8 @@
 
 // Defined in src/lib.rs.
 extern "C" void *atlas_backend_new();
+// Defined in src/demo.rs: the demo step, empty unless demo mode is allowed.
+extern "C" const char *atlas_demo_page();
 
 int main(int argc, char *argv[])
 {
@@ -38,7 +40,7 @@ int main(int argc, char *argv[])
         {QStringLiteral("backend"), QVariant::fromValue(backend.get())},
         {QStringLiteral("fullScreen"), parser.isSet(fullScreen)},
         // Demo mode only: open at this step, for screenshots.
-        {QStringLiteral("demoPage"), qEnvironmentVariableIsEmpty("ATLAS_INSTALLER_DEMO") ? QString() : qEnvironmentVariable("ATLAS_INSTALLER_DEMO_PAGE")},
+        {QStringLiteral("demoPage"), QString::fromUtf8(atlas_demo_page())},
     });
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule(QStringLiteral("net.eterneon.atlas.installer"), QStringLiteral("Main"));

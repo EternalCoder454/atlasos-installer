@@ -372,7 +372,17 @@ pub fn fingerprint(d: &Device, table: Option<&Table>) -> String {
         }
     };
     let o = |s: &Option<String>| s.clone().unwrap_or_default();
-    for x in d.walk() {
+    // Device-mapper maps come and go while the installer runs (it closes a
+    // map left by an earlier attempt), so they and everything inside them
+    // (LVM in LUKS) are not part of the identity.
+    let mut nodes = vec![d];
+    let mut i = 0;
+    while i < nodes.len() {
+        let x = nodes[i];
+        nodes.extend(x.children.iter().filter(|c| c.kind != "crypt"));
+        i += 1;
+    }
+    for x in nodes {
         for f in [
             x.name.clone(),
             x.kind.clone(),
@@ -643,6 +653,18 @@ mod tests {
         let mut mounted = d.clone();
         mounted.children[0].mountpoints = vec![Some("/boot/efi".into())];
         assert_eq!(fingerprint(&mounted, t), f);
+        // nor an open LUKS map, or LVM inside it, coming or going
+        let mut opened = d.clone();
+        let mut lv = d.children[0].clone();
+        lv.name = "/dev/mapper/vg-root".into();
+        lv.kind = "lvm".into();
+        lv.children.clear();
+        let mut map = lv.clone();
+        map.name = "/dev/mapper/luks-1".into();
+        map.kind = "crypt".into();
+        map.children = vec![lv];
+        opened.children[0].children.push(map);
+        assert_eq!(fingerprint(&opened, t), f);
     }
 
     #[test]

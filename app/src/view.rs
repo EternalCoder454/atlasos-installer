@@ -197,7 +197,7 @@ fn lower_first(s: &str) -> String {
 }
 
 /// What the Restart page shows after a successful install.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Done {
     /// The MOK Manager password, or "" when the key wasn't queued.
@@ -207,10 +207,38 @@ pub struct Done {
     pub boot_media: String,
     pub warnings: Vec<String>,
     pub log: String,
+    /// The disk's recovery key as the helper made it, or "" (not encrypted).
+    pub recovery_key: String,
+    /// The key for reading: rows of four groups (see `recovery_rows`).
+    pub recovery_rows: Vec<String>,
 }
 
-/// The helper's Install answer.
-#[derive(Debug, serde::Deserialize)]
+/// The recovery key and the MOK password never show in `Debug` output.
+impl std::fmt::Debug for Done {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hide = |s: &str| if s.is_empty() { "" } else { "<hidden>" };
+        f.debug_struct("Done")
+            .field("mok_password", &hide(&self.mok_password))
+            .field("windows_entry", &self.windows_entry)
+            .field("boot_media", &self.boot_media)
+            .field("warnings", &self.warnings)
+            .field("log", &self.log)
+            .field("recovery_key", &hide(&self.recovery_key))
+            .field(
+                "recovery_rows",
+                &self
+                    .recovery_rows
+                    .iter()
+                    .map(|_| "<hidden>")
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+/// The helper's Install answer. No `Debug`: it holds the MOK password and
+/// the recovery key.
+#[derive(serde::Deserialize)]
 struct Outcome {
     mok_password: Option<String>,
     windows_entry: bool,
@@ -220,18 +248,184 @@ struct Outcome {
     warnings: Vec<String>,
     #[serde(default)]
     log: String,
+    #[serde(default)]
+    recovery_key: Option<String>,
+    /// "" from a helper older than this field: taken as not encrypted.
+    #[serde(default)]
+    encryption: String,
 }
 
 pub fn done_from_outcome(json: &str) -> Result<Done, String> {
     let o: Outcome =
         serde_json::from_str(json).map_err(|e| format!("bad answer from the installer: {e}"))?;
-    Ok(Done {
+    let d = Done {
         mok_password: o.mok_password.unwrap_or_default(),
         windows_entry: o.windows_entry,
         boot_media: o.boot_media,
         warnings: o.warnings,
         log: o.log,
-    })
+        recovery_rows: recovery_rows(o.recovery_key.as_deref().unwrap_or("")),
+        recovery_key: o.recovery_key.unwrap_or_default(),
+    };
+    Ok(require_key(d, &o.encryption))
+}
+
+/// A Done for an encrypted install (`encryption` other than "none" or "")
+/// must carry the recovery key. If it doesn't, say so in plain words, with
+/// how to make a new one after the restart: systemd-cryptenroll unlocks with
+/// the TPM only when told to, else it asks for the disk password, and wipes
+/// the old recovery slot after enrolling, never the new one.
+pub fn require_key(mut d: Done, encryption: &str) -> Done {
+    const NO_KEY: &str = "recovery key couldn't be shown";
+    let unlock = match encryption {
+        "" | "none" => return d,
+        "tpm" | "tpm-pin" => "--unlock-tpm2-device=auto ",
+        _ => "",
+    };
+    if d.recovery_key.is_empty() && !d.warnings.iter().any(|w| w.contains(NO_KEY)) {
+        d.warnings.push(format!(
+            "AtlasOS is installed and encrypted, but its {NO_KEY}, so you don't have one yet. \
+             After the restart, make a new one in a terminal with \
+             \"sudo systemd-cryptenroll {unlock}--recovery-key --wipe-slot=recovery\" \
+             followed by the AtlasOS partition (\"lsblk -f\" shows it as crypto_LUKS), \
+             and keep it away from this PC."
+        ));
+    }
+    d
+}
+
+/// The recovery key in rows of four groups, for the Restart page. Groups
+/// keep their dashes, so a copied key is one the disk accepts.
+pub fn recovery_rows(key: &str) -> Vec<String> {
+    let groups: Vec<&str> = key.split('-').filter(|g| !g.is_empty()).collect();
+    groups.chunks(4).map(|row| row.join("-")).collect()
+}
+
+/// The helper's rules for what is typed at start-up: printable ASCII only
+/// (0x20 to 0x7e), because the start-up prompt can't reliably type
+/// anything else. A password is 8 to 256 characters, a PIN 6 to 64.
+pub const PASSWORD_MIN: usize = 8;
+pub const PASSWORD_MAX: usize = 256;
+pub const PIN_MIN: usize = 6;
+pub const PIN_MAX: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretProblem {
+    Empty,
+    TooShort,
+    TooLong,
+    /// Not printable ASCII: an accent, another script, an emoji, a tab.
+    BadChar,
+}
+
+fn secret_problem(s: &str, min: usize, max: usize) -> Option<SecretProblem> {
+    if s.is_empty() {
+        Some(SecretProblem::Empty)
+    } else if !s.bytes().all(|b| (0x20..=0x7e).contains(&b)) {
+        Some(SecretProblem::BadChar)
+    } else if s.len() < min {
+        Some(SecretProblem::TooShort)
+    } else if s.len() > max {
+        Some(SecretProblem::TooLong)
+    } else {
+        None
+    }
+}
+
+pub fn password_problem(pw: &str) -> Option<SecretProblem> {
+    secret_problem(pw, PASSWORD_MIN, PASSWORD_MAX)
+}
+
+pub fn pin_problem(pin: &str) -> Option<SecretProblem> {
+    secret_problem(pin, PIN_MIN, PIN_MAX)
+}
+
+/// The problem with what is typed for this encryption mode ("password" or
+/// "tpm-pin"; any other mode types nothing).
+fn problem_for(mode: &str, s: &str) -> Option<SecretProblem> {
+    match mode {
+        "password" => password_problem(s),
+        "tpm-pin" => pin_problem(s),
+        _ => None,
+    }
+}
+
+/// Continue may be pressed: a valid password or PIN, typed twice the same.
+pub fn secret_ok(mode: &str, s: &str, confirm: &str) -> bool {
+    problem_for(mode, s).is_none() && s == confirm
+}
+
+/// The line under the fields: what is wrong, or "" while nothing is (an
+/// empty field is not nagged about; the hint below says the rule).
+pub fn secret_hint(mode: &str, s: &str, confirm: &str) -> String {
+    let pin = mode == "tpm-pin";
+    match problem_for(mode, s) {
+        Some(SecretProblem::Empty) => String::new(),
+        Some(SecretProblem::TooShort) if pin => "Use at least 6 characters.".into(),
+        Some(SecretProblem::TooShort) => "Use at least 8 characters.".into(),
+        Some(SecretProblem::TooLong) => {
+            format!("That {} is too long.", if pin { "PIN" } else { "password" })
+        }
+        Some(SecretProblem::BadChar) => {
+            "Use letters without accents, numbers, spaces and symbols only.".into()
+        }
+        None if !confirm.is_empty() && s != confirm => {
+            format!(
+                "The two {} don't match.",
+                if pin { "PINs" } else { "passwords" }
+            )
+        }
+        None => String::new(),
+    }
+}
+
+/// The disk is encrypted unless the user said otherwise: on when this PC
+/// has a TPM 2.0 (it costs nothing then), off when it would need a password.
+pub fn encryption_default(tpm2: bool) -> bool {
+    tpm2
+}
+
+/// The PIN switch starts on when there is a TPM but Secure Boot is off:
+/// TPM-only unlocking gives little protection then.
+pub fn pin_default(tpm2: bool, secure_boot_off: bool) -> bool {
+    tpm2 && secure_boot_off
+}
+
+/// What Install is told: "none", "tpm", "tpm-pin" or "password". `pin`
+/// (ask for a PIN at start-up) counts only with a TPM.
+pub fn encryption_mode(tpm2: bool, on: bool, pin: bool) -> &'static str {
+    match (on, tpm2) {
+        (false, _) => "none",
+        (true, true) if pin => "tpm-pin",
+        (true, true) => "tpm",
+        (true, false) => "password",
+    }
+}
+
+/// The Review page's row.
+pub fn review_encryption(mode: &str) -> &'static str {
+    match mode {
+        "tpm" => "On, unlocks with this PC's security chip",
+        "tpm-pin" => "On, unlocks with this PC's security chip and a PIN",
+        "password" => "On, password at start-up",
+        _ => "Off",
+    }
+}
+
+/// ListDisks says Secure Boot is off (absent: unknown, so no warning).
+pub fn secure_boot_off(list_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(list_json)
+        .ok()
+        .and_then(|v| v["secure_boot"].as_bool())
+        == Some(false)
+}
+
+/// Whether ListDisks says this PC has a usable TPM 2.0.
+pub fn tpm2_of(list_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(list_json)
+        .ok()
+        .and_then(|v| v["tpm2"].as_bool())
+        .unwrap_or(false)
 }
 
 /// The smallest disk AtlasOS installs to, for the Disk page's texts: the
@@ -287,16 +481,31 @@ pub fn reattach(json: &str) -> Result<Reattach, String> {
             fraction: s.fraction,
             text: s.text,
         }),
-        "done" => Ok(Reattach::Done(
-            s.result
-                .ok_or_else(|| "no result".to_string())
-                .and_then(|v| done_from_outcome(&v.to_string()))
-                // The install succeeded even if its report can't be read
-                .unwrap_or_else(|m| Done {
-                    warnings: vec![format!("The installer's report couldn't be read ({m}).")],
-                    ..Default::default()
-                }),
-        )),
+        "done" => {
+            // The install succeeded even if its report can't be read; the
+            // mode, if it's there, still says whether a key is missing.
+            let mode = s
+                .result
+                .as_ref()
+                .and_then(|v| v.get("encryption"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("")
+                .to_string();
+            Ok(Reattach::Done(
+                s.result
+                    .ok_or_else(|| "no result".to_string())
+                    .and_then(|v| done_from_outcome(&v.to_string()))
+                    .unwrap_or_else(|m| {
+                        let d = Done {
+                            warnings: vec![format!(
+                                "The installer's report couldn't be read ({m})."
+                            )],
+                            ..Default::default()
+                        };
+                        require_key(d, &mode)
+                    }),
+            ))
+        }
         "failed" => Ok(Reattach::Failed(
             crate::helper::describe("net.eterneon.atlas.Error.Failed", s.error.as_deref()).message,
         )),
@@ -330,7 +539,60 @@ pub fn follow(r: Reattach) -> Follow {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn done_debug_hides_the_secrets() {
+        let d = super::Done {
+            mok_password: "12345678".into(),
+            recovery_key: "ulcbjnni-ehtlcfnl".into(),
+            recovery_rows: vec!["ulcb jnni".into()],
+            ..Default::default()
+        };
+        let s = format!("{d:?}");
+        assert!(
+            !s.contains("12345678") && !s.contains("ulcb") && s.contains("<hidden>"),
+            "{s}"
+        );
+    }
+
     use super::*;
+
+    #[test]
+    fn an_encrypted_install_without_a_key_warns() {
+        let d = require_key(Done::default(), "tpm");
+        assert_eq!(d.warnings.len(), 1);
+        assert!(d.warnings[0].contains("recovery key couldn't be shown"));
+        assert!(d.warnings[0].contains("--unlock-tpm2-device=auto --recovery-key"));
+        let d = require_key(Done::default(), "password");
+        assert!(
+            !d.warnings[0].contains("tpm2"),
+            "a password disk asks for it"
+        );
+        assert!(require_key(Done::default(), "none").warnings.is_empty());
+        assert!(require_key(Done::default(), "").warnings.is_empty());
+        let keyed = Done {
+            recovery_key: "a-b".into(),
+            ..Default::default()
+        };
+        assert!(require_key(keyed, "tpm").warnings.is_empty());
+        // Status to a caller who may not see the key: warned once, even when
+        // the backend checks again
+        let d = done_from_outcome(
+            r#"{"mok_password":null,"windows_entry":false,"encryption":"tpm-pin"}"#,
+        )
+        .unwrap();
+        assert_eq!(require_key(d, "tpm-pin").warnings.len(), 1);
+        let d = done_from_outcome(r#"{"mok_password":null,"windows_entry":false}"#).unwrap();
+        assert!(d.warnings.is_empty(), "an older helper's answer");
+        // a report that can't be read still warns when its mode says encrypted
+        let st = r#"{"state":"done","result":{"encryption":"password","windows_entry":"x"}}"#;
+        match reattach(st).unwrap() {
+            Reattach::Done(d) => {
+                assert_eq!(d.warnings.len(), 2, "{:?}", d.warnings);
+                assert!(d.warnings[1].contains("recovery key couldn't be shown"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
 
     #[test]
     fn the_minimum_disk_size_is_the_cores() {
@@ -520,5 +782,124 @@ mod tests {
         // same last four: the path, which always differs
         list.disks[4].serial = Some("XX4F2A".into());
         assert_eq!(titles(&list)[4], format!("{}, /dev/sdz", empty.name));
+    }
+
+    const KEY: &str = "abcdefgh-ijklmnop-qrstuvwx-yzabcdef-ghijklmn-opqrstuv-wxyzabcd-efghijkl";
+
+    #[test]
+    fn password_and_pin_rules_match_the_helper() {
+        use SecretProblem::*;
+        assert_eq!(password_problem(""), Some(Empty));
+        assert_eq!(password_problem("1234567"), Some(TooShort));
+        assert_eq!(password_problem("12345678"), None);
+        assert_eq!(password_problem(&"a".repeat(256)), None);
+        assert_eq!(password_problem(&"a".repeat(257)), Some(TooLong));
+        assert_eq!(password_problem("pass word 1~"), None);
+        // printable ASCII only: no accents, scripts, emoji, controls
+        assert_eq!(password_problem("pässwörd"), Some(BadChar));
+        assert_eq!(password_problem("密码密码密码密码"), Some(BadChar));
+        assert_eq!(password_problem("password🙂"), Some(BadChar));
+        assert_eq!(password_problem("abcd\tefgh"), Some(BadChar));
+        assert_eq!(password_problem("abcdefgh\n"), Some(BadChar));
+        assert_eq!(password_problem("abcdefgh\u{7f}"), Some(BadChar));
+        assert_eq!(pin_problem("12345"), Some(TooShort));
+        assert_eq!(pin_problem("123456"), None);
+        assert_eq!(pin_problem(&"1".repeat(64)), None);
+        assert_eq!(pin_problem(&"1".repeat(65)), Some(TooLong));
+        assert_eq!(pin_problem("12345é"), Some(BadChar));
+    }
+
+    #[test]
+    fn secrets_must_match() {
+        assert!(secret_ok("password", "correct horse", "correct horse"));
+        assert!(!secret_ok("password", "correct horse", "correct horsf"));
+        assert!(!secret_ok("password", "correct horse", ""));
+        assert!(!secret_ok("password", "short", "short"));
+        assert!(secret_ok("tpm-pin", "123456", "123456"));
+        assert!(!secret_ok("tpm-pin", "12345", "12345"));
+        assert_eq!(secret_hint("password", "", ""), "");
+        assert_eq!(
+            secret_hint("password", "abc", ""),
+            "Use at least 8 characters."
+        );
+        assert_eq!(
+            secret_hint("tpm-pin", "123", ""),
+            "Use at least 6 characters."
+        );
+        assert_eq!(secret_hint("password", "correct horse", ""), "");
+        assert_eq!(
+            secret_hint("password", "correct horse", "correct"),
+            "The two passwords don't match."
+        );
+        assert_eq!(
+            secret_hint("tpm-pin", "123456", "12345"),
+            "The two PINs don't match."
+        );
+        assert_eq!(
+            secret_hint("password", "correct horse", "correct horse"),
+            ""
+        );
+        assert!(secret_hint("password", "pässwörd", "").contains("without accents"));
+    }
+
+    #[test]
+    fn encryption_follows_the_tpm() {
+        assert!(encryption_default(true));
+        assert!(!encryption_default(false));
+        assert!(pin_default(true, true));
+        assert!(!pin_default(true, false));
+        assert!(!pin_default(false, true));
+        assert_eq!(encryption_mode(true, true, false), "tpm");
+        assert_eq!(encryption_mode(true, true, true), "tpm-pin");
+        assert_eq!(encryption_mode(false, true, false), "password");
+        assert_eq!(encryption_mode(false, true, true), "password");
+        assert_eq!(encryption_mode(true, false, true), "none");
+        assert_eq!(encryption_mode(false, false, false), "none");
+        assert_eq!(
+            review_encryption("tpm"),
+            "On, unlocks with this PC's security chip"
+        );
+        assert_eq!(
+            review_encryption("tpm-pin"),
+            "On, unlocks with this PC's security chip and a PIN"
+        );
+        assert_eq!(review_encryption("password"), "On, password at start-up");
+        assert_eq!(review_encryption("none"), "Off");
+        assert!(tpm2_of(r#"{"disks":[],"tpm2":true}"#));
+        assert!(!tpm2_of(r#"{"disks":[],"tpm2":false}"#));
+        assert!(!tpm2_of(r#"{"disks":[]}"#));
+        assert!(!tpm2_of("nope"));
+        assert!(secure_boot_off(r#"{"secure_boot":false}"#));
+        assert!(!secure_boot_off(r#"{"secure_boot":true}"#));
+        assert!(!secure_boot_off(r#"{"disks":[]}"#));
+    }
+
+    #[test]
+    fn the_recovery_key_comes_in_two_rows() {
+        let rows = recovery_rows(KEY);
+        assert_eq!(
+            rows,
+            [
+                "abcdefgh-ijklmnop-qrstuvwx-yzabcdef",
+                "ghijklmn-opqrstuv-wxyzabcd-efghijkl"
+            ]
+        );
+        assert!(recovery_rows("").is_empty());
+    }
+
+    #[test]
+    fn the_recovery_key_survives_the_outcome_and_status() {
+        let j = format!(r#"{{"mok_password":null,"windows_entry":false,"recovery_key":"{KEY}"}}"#);
+        let d = done_from_outcome(&j).unwrap();
+        assert_eq!(d.recovery_key, KEY);
+        assert_eq!(d.recovery_rows.len(), 2);
+        let d = done_from_outcome(r#"{"windows_entry":false,"recovery_key":null}"#).unwrap();
+        assert!(d.recovery_key.is_empty() && d.recovery_rows.is_empty());
+        // a UI that restarts reads it again from Status
+        let st = format!(r#"{{"state":"done","result":{j}}}"#);
+        match reattach(&st).unwrap() {
+            Reattach::Done(d) => assert_eq!(d.recovery_key, KEY),
+            other => panic!("{other:?}"),
+        }
     }
 }

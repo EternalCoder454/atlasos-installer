@@ -74,6 +74,19 @@ impl Lsblk {
         serde_json::from_str(json).map_err(|e| format!("cannot read lsblk output: {e}"))
     }
 
+    /// The names (`luks-<uuid>`) of the installer's own crypt mappings on
+    /// the disk with this path, e.g. left by an install that failed. See
+    /// [`Device::installer_mappers`].
+    pub fn luks_mappers_on(&self, disk: &str) -> Vec<String> {
+        let Some(d) = self.find(disk) else {
+            return Vec::new();
+        };
+        d.installer_mappers()
+            .into_iter()
+            .filter_map(|x| x.name.strip_prefix("/dev/mapper/").map(String::from))
+            .collect()
+    }
+
     /// The top-level device with this path.
     pub fn find(&self, path: &str) -> Option<&Device> {
         self.blockdevices.iter().find(|d| d.name == path)
@@ -90,6 +103,35 @@ impl Device {
             i += 1;
         }
         out
+    }
+
+    /// An encrypted-root mapping the installer made: type `crypt`, named
+    /// `/dev/mapper/luks-<uuid>`.
+    pub fn is_luks_mapper(&self) -> bool {
+        self.kind == "crypt"
+            && self
+                .name
+                .strip_prefix("/dev/mapper/")
+                .and_then(crate::crypt::mapper_uuid)
+                .is_some()
+    }
+
+    /// The installer's own LUKS container: LUKS with the label `atlasos`
+    /// (see the helper's luksFormat).
+    pub fn is_installer_luks(&self) -> bool {
+        self.fstype() == Some("crypto_LUKS") && self.label() == Some("atlasos")
+    }
+
+    /// The `luks-<uuid>` mappings of the installer's own containers in this
+    /// tree. A volume the user unlocked themselves (another label, or a
+    /// name that isn't `luks-<uuid>`) is not one of them.
+    pub fn installer_mappers(&self) -> Vec<&Device> {
+        self.walk()
+            .into_iter()
+            .filter(|d| d.is_installer_luks())
+            .flat_map(|d| d.children.iter())
+            .filter(|c| c.is_luks_mapper())
+            .collect()
     }
 
     /// The kernel name without `/dev/`, e.g. `nvme0n1`.
@@ -210,5 +252,37 @@ mod tests {
             ["/dev/sda", "/dev/sda1", "/dev/sda2", "/dev/mapper/x"]
         );
         assert_eq!(l.blockdevices[0].partitions().count(), 2);
+    }
+
+    #[test]
+    fn leftover_luks_mappers_are_found_on_their_own_disk_only() {
+        let l = Lsblk::parse(include_str!("../tests/fixtures/lsblk-luks-left.json")).unwrap();
+        assert_eq!(
+            l.luks_mappers_on("/dev/sda"),
+            ["luks-0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f"]
+        );
+        // a luks-<uuid> volume on a container that isn't ours (the user
+        // unlocked it in the file manager) and other names are left alone
+        assert!(l.luks_mappers_on("/dev/sdb").is_empty());
+        assert!(l.luks_mappers_on("/dev/sdd").is_empty());
+        assert_eq!(
+            l.luks_mappers_on("/dev/sdc").len(),
+            1,
+            "ours, though mounted"
+        );
+        let win = Lsblk::parse(include_str!("../tests/fixtures/lsblk-windows.json")).unwrap();
+        assert!(win.luks_mappers_on("/dev/sda").is_empty());
+    }
+
+    #[test]
+    fn a_leftover_luks_mapper_does_not_make_the_disk_in_use_but_other_maps_do() {
+        let l = Lsblk::parse(include_str!("../tests/fixtures/lsblk-luks-left.json")).unwrap();
+        assert!(!crate::plan::in_use(l.find("/dev/sda").unwrap()));
+        // sdb: a volume that is not ours, still open
+        assert!(crate::plan::in_use(l.find("/dev/sdb").unwrap()));
+        // sdc: ours, but mounted
+        assert!(crate::plan::in_use(l.find("/dev/sdc").unwrap()));
+        // sdd: another label, though the name is ours
+        assert!(crate::plan::in_use(l.find("/dev/sdd").unwrap()));
     }
 }
