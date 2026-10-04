@@ -27,14 +27,23 @@ Rectangle {
         id: list
         anchors.fill: parent
         anchors.margins: 1
+        // Beside the scroll bar, not under it: rows end where it starts, so
+        // nothing at their right edge (a lock, a checkmark) is covered.
+        anchors.rightMargin: 1 + (bar.visible ? bar.width : 0)
         clip: true
         keyNavigationEnabled: true
         boundsBehavior: Flickable.StopAtBounds
         highlightMoveDuration: 0
         activeFocusOnTab: true
-        QQC2.ScrollBar.vertical: QQC2.ScrollBar {
-            policy: QQC2.ScrollBar.AsNeeded
-        }
+        QQC2.ScrollBar.vertical: bar
+    }
+    QQC2.ScrollBar {
+        id: bar
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.margins: 1
+        policy: QQC2.ScrollBar.AsNeeded
     }
 
     QQC2.Label {

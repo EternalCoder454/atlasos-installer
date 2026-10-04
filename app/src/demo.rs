@@ -6,6 +6,7 @@
 //! |---|---|
 //! | `wired` | Connected by cable: the Wi-Fi page is skipped |
 //! | `nowifi` | No Wi-Fi adapter |
+//! | `crowd` | Many Wi-Fi networks, so the list scrolls |
 //! | `nodisks` | No disk can be offered |
 //! | `onedisk` | Only the Windows disk, so it is chosen for you |
 //! | `emptydisk` | Only the empty disk |
@@ -34,6 +35,7 @@ use crate::view::Done;
 pub struct Flags {
     pub wired: bool,
     pub nowifi: bool,
+    pub crowd: bool,
     pub nodisks: bool,
     pub onedisk: bool,
     pub emptydisk: bool,
@@ -71,6 +73,7 @@ pub fn parse(v: &str) -> Option<Flags> {
         match w {
             "wired" => f.wired = true,
             "nowifi" => f.nowifi = true,
+            "crowd" => f.crowd = true,
             "nodisks" => f.nodisks = true,
             "onedisk" => f.onedisk = true,
             "emptydisk" => f.emptydisk = true,
@@ -146,6 +149,29 @@ pub fn wifi(f: &Flags, connected: Option<&str>) -> WifiState {
         net("Office", 30, Security::Enterprise),
         net("DIRECT-printer", 18, Security::Psk),
     ];
+    if f.crowd {
+        // An apartment block's worth: more than the list shows at once
+        for (i, name) in [
+            "Flat 2B",
+            "Flat 3A",
+            "VM-Hub-7731",
+            "Garden Room",
+            "TALKTALK-41C2",
+            "Guest",
+            "Studio Upstairs",
+            "Pixel_8213",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let security = if i % 3 == 2 {
+                Security::Sae
+            } else {
+                Security::Psk
+            };
+            networks.push(net(name, 60 - i as u8 * 6, security));
+        }
+    }
     if let Some(c) = connected
         && let Some(n) = networks.iter_mut().find(|n| n.ssid == c)
     {

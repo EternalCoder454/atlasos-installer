@@ -38,7 +38,9 @@ if [ "${ATLAS:-0}" = 1 ]; then
 </fontconfig>
 FC
 fi
-printf '\n[Icons]\nTheme=breeze%s\n' "$([ "$theme" = dark ] && echo -dark)" >>"$tmp/config/kdeglobals"
+# ICONS names another icon theme, such as Papirus-Dark, AtlasOS's own (the
+# container has only Breeze: install papirus-icon-theme in it first).
+printf '\n[Icons]\nTheme=%s\n' "${ICONS:-breeze$([ "$theme" = dark ] && echo -dark)}" >>"$tmp/config/kdeglobals"
 
 cat >"$tmp/run.sh" <<INNER
 #!/bin/bash
