@@ -92,7 +92,7 @@ InstallerPage {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: Kirigami.Units.gridUnit * 3
                 spacing: Kirigami.Units.largeSpacing
-                QQC2.BusyIndicator {
+                AtlasSpinner {
                     running: parent.visible
                 }
                 QQC2.Label {

@@ -1,18 +1,19 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import Atlas.Ui
 
 // A rounded search box. Down moves into the list below it. Not named
 // SearchField: Atlas.Ui has one, and its import would hide this file.
-QQC2.TextField {
+AtlasTextField {
     id: field
 
     signal down
 
     Layout.fillWidth: true
     placeholderText: qsTr("Search")
-    leftPadding: Kirigami.Units.largeSpacing + Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+    clearable: true
+    leftPadding: Kirigami.Units.largeSpacing + Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing * 2
     inputMethodHints: Qt.ImhNoPredictiveText
     Accessible.name: placeholderText
     Keys.onDownPressed: field.down()
@@ -20,7 +21,8 @@ QQC2.TextField {
     Kirigami.Icon {
         anchors.left: parent.left
         anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.verticalCenter: parent.verticalCenter
+        // the field's pill, not the whole item (which has room for errorText)
+        y: Math.round((field.background.height - height) / 2)
         width: Kirigami.Units.iconSizes.small
         height: width
         source: "search"

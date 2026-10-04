@@ -37,7 +37,10 @@ or `ATLAS_FRAMEWORK_SRC`) into `localhost/atlas-installer-dev:atlas-ui`
 (`app/Containerfile.atlas-ui`). The ISO build instead copies it from the
 AtlasOS image it embeds (`iso/Containerfile.atlas-ui`), so the installer is
 built against the exact Atlas.Ui the live session runs. Atlas.Ui changes go
-to atlas-framework, never here.
+to atlas-framework, never here. The installer needs Atlas.Ui 1.3.0 or newer
+(AtlasTextField, AtlasComboBox, AtlasSpinner): configuring stops with a plain
+message against an older one, which for an ISO means an AtlasOS image that
+ships `atlas-ui` older than 1.3.0.
 
 Clippy and rustfmt for the workspace also run in a container:
 

@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import Atlas.Ui
 
@@ -84,7 +83,7 @@ InstallerPage {
             SectionRow {
                 visible: page.layout !== null && page.layout.variants.length > 0
                 title: qsTr("Variant")
-                QQC2.ComboBox {
+                AtlasComboBox {
                     id: variants
                     width: Kirigami.Units.gridUnit * 16
                     textRole: "name"
@@ -100,7 +99,7 @@ InstallerPage {
             }
             SectionRow {
                 title: qsTr("Try it")
-                QQC2.TextField {
+                AtlasTextField {
                     width: Kirigami.Units.gridUnit * 16
                     placeholderText: qsTr("Type here to test")
                     Accessible.name: placeholderText

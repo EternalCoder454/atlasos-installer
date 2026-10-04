@@ -120,7 +120,7 @@ InstallerPage {
             visible: box.hidden
             spacing: Kirigami.Units.largeSpacing
             Layout.fillWidth: true
-            QQC2.TextField {
+            AtlasTextField {
                 id: nameField
                 Layout.fillWidth: true
                 placeholderText: qsTr("Network name")
@@ -128,7 +128,7 @@ InstallerPage {
                 enabled: page.connecting.length === 0
                 onAccepted: password.forceActiveFocus()
             }
-            QQC2.ComboBox {
+            AtlasComboBox {
                 id: security
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 14
                 enabled: page.connecting.length === 0
@@ -179,9 +179,8 @@ InstallerPage {
             }
             // Only while there's nothing to list yet: the rescan every 15 s
             // just updates the rows, without a spinner redrawing the page.
-            QQC2.BusyIndicator {
-                visible: page.app.backend.wifiScanning && (page.wifi.networks || []).length === 0
-                running: visible
+            AtlasSpinner {
+                running: page.app.backend.wifiScanning && (page.wifi.networks || []).length === 0
                 implicitWidth: Kirigami.Units.iconSizes.small
                 implicitHeight: implicitWidth
             }

@@ -30,9 +30,19 @@ target_include_directories(atlas-installer-app PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 # atlas-framework): QML imports it and nothing links it. qmlcachegen and
 # qmllint read its types from the installed copy. The live ISO runs on the
 # AtlasOS image, which has it; app/dev.sh puts it in the build container.
-if(NOT EXISTS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_QML}/Atlas/Ui/qmldir")
+set(ATLAS_UI_QMLDIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_QML}/Atlas/Ui/qmldir")
+if(NOT EXISTS "${ATLAS_UI_QMLDIR}")
     message(FATAL_ERROR "Atlas.Ui is not installed: build in app/dev.sh's container")
 endif()
+# Atlas.Ui 1.3.0 or newer: its form controls and spinner. An older one would
+# build and then fail to load the pages, so stop here. (For an ISO: the
+# AtlasOS image it embeds must ship atlas-ui >= 1.3.0.)
+file(READ "${ATLAS_UI_QMLDIR}" ATLAS_UI_TYPES)
+foreach(type AtlasTextField AtlasComboBox AtlasSpinner)
+    if(NOT ATLAS_UI_TYPES MATCHES "(^|\n)${type} ")
+        message(FATAL_ERROR "The installed Atlas.Ui has no ${type}: the installer needs atlas-ui 1.3.0 or newer")
+    endif()
+endforeach()
 
 # qmlcachegen compiles every QML file to C++ at build time; the app reads no
 # .qml from disk at run time.
