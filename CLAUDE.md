@@ -24,9 +24,9 @@ Phase 0 results are in Atlas Notes, under `AtlasOS/Atlas Installer/Roadmap`.
     client. `src/network.rs`: Wi-Fi through NetworkManager.
   - `src/view.rs`: what the pages show, unit-tested.
   - `src/demo.rs`: demo mode (see below). `qml/`: the pages.
-- `ui/`: a copy of atlasos-updater's shared QML components (Atlas.Ui). Keep
-  the files identical to upstream, apart from the ones `ui/README.md` lists
-  as added here.
+- Atlas.Ui (`import Atlas.Ui`) is not here: it is the installed module from
+  atlas-framework (`../Atlas Framework`, or `ATLAS_FRAMEWORK_SRC`), which
+  `app/dev.sh` builds into its image. Change it there, never copy it here.
 - `iso/`, `live/`: the live ISO build. `tests/vm/`: the VM test tools.
 
 ## Commands

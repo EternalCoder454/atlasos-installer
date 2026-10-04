@@ -3,7 +3,8 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// A rounded search box. Down moves into the list below it.
+// A rounded search box. Down moves into the list below it. Not named
+// SearchField: Atlas.Ui has one, and its import would hide this file.
 QQC2.TextField {
     id: field
 

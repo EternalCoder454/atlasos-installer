@@ -26,15 +26,22 @@ target_compile_definitions(atlas-installer-app PRIVATE ATLAS_INSTALLER_VERSION="
 # The QML type registration includes localeinfo.h by its bare name.
 target_include_directories(atlas-installer-app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cpp)
 
+# Atlas.Ui, the shared Atlas look, is installed like Kirigami (atlas-ui, from
+# atlas-framework): QML imports it and nothing links it. qmlcachegen and
+# qmllint read its types from the installed copy. The live ISO runs on the
+# AtlasOS image, which has it; app/dev.sh puts it in the build container.
+if(NOT EXISTS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_QML}/Atlas/Ui/qmldir")
+    message(FATAL_ERROR "Atlas.Ui is not installed: build in app/dev.sh's container")
+endif()
+
 # qmlcachegen compiles every QML file to C++ at build time; the app reads no
 # .qml from disk at run time.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui atlas-ui)
 qt_add_qml_module(atlas-installer-app
     URI net.eterneon.atlas.installer
     VERSION 1.0
     SOURCES cpp/localeinfo.h cpp/localeinfo.cpp
     QML_FILES
-        qml/Main.qml qml/InstallerPage.qml qml/SearchField.qml qml/ChoiceCard.qml qml/Note.qml
+        qml/Main.qml qml/InstallerPage.qml qml/ListSearchField.qml qml/ChoiceCard.qml qml/Note.qml
         qml/ListFrame.qml qml/ListRow.qml qml/BrandPanel.qml qml/BackButton.qml
         qml/WelcomePage.qml qml/KeyboardPage.qml qml/WifiPage.qml qml/DiskPage.qml
         qml/ReviewPage.qml qml/ProgressPage.qml qml/RestartPage.qml
@@ -45,7 +52,7 @@ qt_add_qml_module(atlas-installer-app
 )
 
 target_link_libraries(atlas-installer-app PRIVATE
-    atlas_installer atlas-ui atlas-uiplugin
+    atlas_installer
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Widgets)
 
 install(TARGETS atlas-installer-app RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

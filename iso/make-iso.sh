@@ -111,8 +111,10 @@ fi
 query=(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' qt6-qtbase qt6-qtdeclarative kf6-kirigami glibc)
 builds() { sort -u | tr '\n' ' '; }
 want=$(podman run --rm --pull=never --entrypoint rpm "$base" "${query[@]:1}" | builds)
-have=$(app/dev.sh "${query[@]}" | builds)
-dev=
+podman image exists localhost/atlas-installer-dev ||
+	podman build -q -t localhost/atlas-installer-dev -f app/Containerfile.dev app >/dev/null
+have=$(ATLAS_DEV_IMAGE=localhost/atlas-installer-dev app/dev.sh "${query[@]}" | builds)
+dev=localhost/atlas-installer-dev
 if [ "$have" != "$want" ]; then
 	echo ">> Pinning the build container to the image's builds: $want"
 	# Named by the builds and the dev container it starts from, so a rebuilt
@@ -130,8 +132,20 @@ if [ "$have" != "$want" ]; then
 	}
 fi
 
+# The installer builds against the installed Atlas.Ui: the image's own copy
+# (iso/Containerfile.atlas-ui), the one the live system runs it with.
+podman run --rm --pull=never --entrypoint test "$base" -f /usr/lib64/qt6/qml/Atlas/Ui/qmldir || {
+	echo "$base has no Atlas.Ui (atlas-ui): build it from an AtlasOS with atlas-framework" >&2
+	exit 1
+}
+from=$(podman image inspect --format '{{.Id}}' "$dev")
+devui=localhost/atlas-installer-dev:iso-$(echo "$from $base" | sha256sum | cut -c1-12)
+podman image exists "$devui" ||
+	podman build -q --pull=never -t "$devui" --build-arg DEV_IMAGE="$dev" --build-arg BASE_IMAGE="$base" \
+		-f iso/Containerfile.atlas-ui iso >/dev/null
+
 echo ">> Building the installer"
-ATLAS_DEV_IMAGE=$dev app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {
+ATLAS_DEV_IMAGE=$devui app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {
 	tail -30 build/stage-installer.log >&2
 	exit 1
 }

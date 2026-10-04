@@ -55,7 +55,7 @@ InstallerPage {
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: Kirigami.Units.largeSpacing
 
-        SearchField {
+        ListSearchField {
             id: search
             placeholderText: qsTr("Search layouts")
             onDown: frame.list.forceActiveFocus()

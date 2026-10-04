@@ -7,7 +7,6 @@
 | `crates/installer-core` | Pure logic, no I/O: lsblk and `sfdisk --json` parsing, which disks to offer, partition plans and their safety checks, settings files, GRUB `custom.cfg`, efibootmgr parsing, progress. Tested with the fixtures in `tests/fixtures/`. |
 | `helper/` | `atlas-installer-helper`, the root helper on the system D-Bus, behind polkit. It lists disks and runs the install. Its API is in [docs/helper-api.md](docs/helper-api.md), and its D-Bus, polkit and systemd files are in `helper/data/`. |
 | `app/` | `atlas-installer`, the UI: Rust with CXX-Qt, and QML with Kirigami, built with CMake and Corrosion. `src/backend.rs` is the QObject the pages use, `src/helper.rs` talks to the helper, `src/network.rs` does Wi-Fi through NetworkManager, and `src/view.rs` decides what each page shows. |
-| `ui/` | A copy of atlasos-updater's shared QML components (Atlas.Ui). Keep the files identical to upstream, apart from the ones `ui/README.md` lists as added here. |
 | `live/` | The live image: the AtlasOS image plus the installer session. |
 | `iso/` | The ISO build. |
 | `tests/vm/` | Tools for the VM tests. |
@@ -29,6 +28,16 @@ the partitions as planned and that the old ones are unchanged.
 
 The UI is built and tested only in its container (`app/Containerfile.dev`),
 through `app/dev.sh`, so its Qt and Kirigami match the live image's.
+
+The shared controls (`import Atlas.Ui`) come from
+[atlas-framework](https://github.com/EternalCoder454/atlas-framework),
+installed in Qt's QML directory like Kirigami; the app links nothing from it.
+`app/dev.sh` builds it from a checkout beside this one (`../Atlas Framework`,
+or `ATLAS_FRAMEWORK_SRC`) into `localhost/atlas-installer-dev:atlas-ui`
+(`app/Containerfile.atlas-ui`). The ISO build instead copies it from the
+AtlasOS image it embeds (`iso/Containerfile.atlas-ui`), so the installer is
+built against the exact Atlas.Ui the live session runs. Atlas.Ui changes go
+to atlas-framework, never here.
 
 Clippy and rustfmt for the workspace also run in a container:
 

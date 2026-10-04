@@ -1,0 +1,13 @@
+# The installer's build container with the Atlas.Ui of the AtlasOS image the
+# ISO is made of, so the installer is compiled against exactly the module the
+# live system runs it with. iso/make-iso.sh builds it:
+#
+#   podman build --build-arg DEV_IMAGE=... --build-arg BASE_IMAGE=... \
+#     -f iso/Containerfile.atlas-ui iso
+ARG DEV_IMAGE=localhost/atlas-installer-dev
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS atlasos
+
+FROM ${DEV_IMAGE}
+COPY --from=atlasos /usr/lib64/qt6/qml/Atlas /usr/lib64/qt6/qml/Atlas
+COPY --from=atlasos /usr/share/fonts/atlas-symbols /usr/share/fonts/atlas-symbols
