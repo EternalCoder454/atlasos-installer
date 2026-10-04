@@ -177,8 +177,10 @@ InstallerPage {
                 Layout.leftMargin: Kirigami.Units.largeSpacing
                 Accessible.role: Accessible.Heading
             }
+            // Only while there's nothing to list yet: the rescan every 15 s
+            // just updates the rows, without a spinner redrawing the page.
             QQC2.BusyIndicator {
-                visible: page.app.backend.wifiScanning
+                visible: page.app.backend.wifiScanning && (page.wifi.networks || []).length === 0
                 running: visible
                 implicitWidth: Kirigami.Units.iconSizes.small
                 implicitHeight: implicitWidth
