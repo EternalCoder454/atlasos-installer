@@ -36,6 +36,17 @@ async fn main() -> ExitCode {
     let env = Env::system();
     match args.as_slice() {
         [] => {
+            // The live system runs from its USB stick or disc, and people
+            // take it out before they press Restart. Pages not yet read in
+            // can't be read then, so read in all of the helper now and keep
+            // it: restarting (install::restart) then needs nothing from it.
+            // SAFETY: mlockall takes only flags
+            if unsafe { libc::mlockall(libc::MCL_CURRENT) } != 0 {
+                eprintln!(
+                    "atlas-installer-helper: can't lock itself in memory: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
             let builder = match zbus::connection::Builder::system() {
                 Ok(b) => b,
                 Err(e) => return fail(format!("cannot reach the system bus: {e}")),

@@ -104,7 +104,7 @@ pub fn live_sources(mounts: &str) -> Vec<String> {
 }
 
 /// `/proc/mounts` writes space, tab, newline and backslash as `\ooo`.
-fn unescape(s: &str) -> String {
+pub fn unescape(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

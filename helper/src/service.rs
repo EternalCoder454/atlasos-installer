@@ -12,7 +12,7 @@ use zbus::object_server::SignalEmitter;
 use zbus::zvariant::Value;
 
 use crate::install::{self, Env, Request};
-use crate::run::{self, Cmd, Runner, bin, lock};
+use crate::run::{self, Runner, lock};
 
 pub const BUS_NAME: &str = "net.eterneon.atlas.InstallerHelper";
 pub const OBJECT_PATH: &str = "/net/eterneon/atlas/InstallerHelper";
@@ -351,7 +351,10 @@ impl Service {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut work = tokio::task::spawn_blocking(move || {
             let _keep = (guard, busy, disks, inhibit);
+            // Recorded here, in order, so the last step is in the status
+            // before it says done (the signals follow on their own).
             let result = install::install(runner.as_ref(), &env, &req, &mut |p| {
+                record(p.stage.id(), p.fraction, p.text());
                 let _ = tx.send((p.stage.id(), p.fraction, p.text()));
             });
             // The final state is written while busy is still held, so no
@@ -384,15 +387,11 @@ impl Service {
         });
         let result = loop {
             tokio::select! {
-                Some((step, fraction, text)) = rx.recv() => {
-                    record(step, fraction, text);
-                    progress(step, fraction, text)
-                }
+                Some((step, fraction, text)) = rx.recv() => progress(step, fraction, text),
                 r = &mut work => break r,
             }
         };
         while let Ok((step, fraction, text)) = rx.try_recv() {
-            record(step, fraction, text);
             progress(step, fraction, text);
         }
         match result {
@@ -547,12 +546,11 @@ impl Service {
         self.authorize(&header, conn, action::REBOOT).await?;
         let busy = self.take_busy()?;
         let runner = self.runner.clone();
-        tokio::task::spawn_blocking(move || {
-            run::run(runner.as_ref(), Cmd::new(bin::SYSTEMCTL, ["reboot"]))
-        })
-        .await
-        .map_err(|e| HelperError::Failed(format!("worker failed: {e}")))?
-        .map_err(HelperError::Failed)?;
+        let env = self.env.clone();
+        tokio::task::spawn_blocking(move || install::restart(runner.as_ref(), &env))
+            .await
+            .map_err(|e| HelperError::Failed(format!("worker failed: {e}")))?
+            .map_err(HelperError::Failed)?;
         // the computer is going down: nothing may touch the disks now
         std::mem::forget(busy);
         // and the helper must not exit and forget it during a slow shutdown
@@ -622,6 +620,7 @@ pub async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run::Cmd;
 
     #[test]
     fn closing_only_when_idle_and_then_refuses_calls() {

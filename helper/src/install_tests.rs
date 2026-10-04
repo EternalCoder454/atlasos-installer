@@ -36,6 +36,9 @@ struct Fake {
     /// sfdisk moves the Windows partition (the safety check must catch it).
     move_partition: bool,
     enrolled: bool,
+    /// What `restart_now` was asked to unmount, once called (the real one
+    /// restarts the computer).
+    restarted: Mutex<Option<Vec<String>>>,
 }
 
 fn ok(stdout: &str) -> Result<Output, String> {
@@ -73,6 +76,11 @@ fn script_parts(script: &str) -> Vec<Partition> {
 }
 
 impl Runner for Fake {
+    fn restart_now(&self, unmount: &[String]) -> Result<(), String> {
+        *lock(&self.restarted) = Some(unmount.to_vec());
+        Ok(())
+    }
+
     fn run(&self, cmd: &Cmd, on_line: &mut dyn FnMut(Option<&str>)) -> Result<Output, String> {
         lock(&self.calls).push(cmd.clone());
         let args: Vec<&str> = cmd.args.iter().map(String::as_str).collect();
@@ -177,8 +185,22 @@ impl Runner for Fake {
                     .and_then(|p| p.uuid.clone())
                     .unwrap_or_default()
                     .to_lowercase();
+                /* Once the helper has made its entry, as the firmware lists it. */
+                let created = lock(&self.calls)
+                    .iter()
+                    .any(|c| c.name() == "efibootmgr" && c.args.iter().any(|a| a == "--create"));
+                let (first, ours) = if created {
+                    (
+                        "0006,",
+                        format!(
+                            "Boot0006* AtlasOS\tHD(1,GPT,{esp},0x800,0x32000)/\\EFI\\fedora\\shimx64.efi\n"
+                        ),
+                    )
+                } else {
+                    ("", String::new())
+                };
                 ok(&format!(
-                    "BootCurrent: 0002\nBootOrder: 0005,0002,0004\n\
+                    "BootCurrent: 0002\nBootOrder: {first}0005,0002,0004\n{ours}\
                      Boot0002* UEFI QEMU DVD-ROM QM00003 \tPciRoot(0x0)/Pci(0x1f,0x2)/Sata(1,65535,0)\n\
                      Boot0004* Windows Boot Manager\tHD(1,GPT,{esp},0x800,0x32000)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi\n\
                      Boot0005* Fedora\tHD(1,GPT,{esp},0x800,0x32000)/\\EFI\\fedora\\shimx64.efi\n"
@@ -235,6 +257,7 @@ impl World {
             "proc/self/mounts",
             b"/dev/sr0 /run/initramfs/live iso9660 ro 0 0\n",
         );
+        put("dev/sr0", b"");
         put(
             "usr/share/systemd/kbd-model-map",
             b"de-latin1-nodeadkeys\tde\tpc105\tnodeadkeys\tterminate:ctrl_alt_bksp\n",
@@ -333,6 +356,8 @@ fn free_space_beside_windows() {
              T/boot/grub2/custom.cfg",
             "efibootmgr",
             "efibootmgr --quiet --create --disk /dev/sda --part 1 --loader \\EFI\\fedora\\shimx64.efi --label AtlasOS",
+            "efibootmgr",
+            "efibootmgr --quiet --bootnext 0006",
             "efibootmgr --quiet --delete-bootnum --bootnum 0005",
             "umount --recursive T",
         ]
@@ -713,10 +738,12 @@ fn late_failures_are_warnings_on_a_finished_install() {
         "setfiles",
         "umount --recursive",
         "efibootmgr --quiet --delete-bootnum",
+        "efibootmgr --quiet --bootnext",
     ];
     let out = w.install(&req("sda", "free-space")).0.unwrap();
     let all = out.warnings.join("\n");
-    assert_eq!(out.warnings.len(), 4, "{all}");
+    assert_eq!(out.warnings.len(), 5, "{all}");
+    assert!(all.contains("start AtlasOS next"), "{all}");
     assert!(all.contains("SELinux label"), "{all}");
     assert!(all.contains("Boot0005 could not be removed"), "{all}");
     assert!(all.contains("could not be unmounted"), "{all}");
@@ -787,4 +814,125 @@ async fn status_follows_a_whole_install_and_keeps_the_result() {
     let hidden = s.do_status(false).unwrap();
     assert!(!hidden.contains(&pw));
     assert_eq!(status(false)["state"], "done");
+}
+
+/// How Restart goes for each state of the live medium (World boots from
+/// /dev/sr0): `(systemctl reboot was run, restarted directly)`.
+fn restarting(w: &World) -> (bool, bool) {
+    restart(&w.fake, &w.env).unwrap();
+    let systemctl = lock(&w.fake.calls)
+        .iter()
+        .any(|c| c.name() == "systemctl" && c.args == ["reboot"]);
+    (systemctl, lock(&w.fake.restarted).is_some())
+}
+
+#[test]
+fn restart_goes_through_systemd_while_the_medium_is_there() {
+    let w = World::new();
+    w.put("sys/class/block/sr0/size", b"7340032\n");
+    assert_eq!(restarting(&w), (true, false));
+}
+
+#[test]
+fn restart_is_direct_once_the_medium_is_gone() {
+    // the disc ejected: the drive is still there, empty
+    let w = World::new();
+    w.put("sys/class/block/sr0/size", b"0\n");
+    assert_eq!(restarting(&w), (false, true));
+    // the USB stick pulled: its device is gone (and the by-label link with it)
+    let w = World::new();
+    w.put(
+        "proc/self/mounts",
+        b"/dev/disk/by-label/AtlasOS /run/initramfs/live iso9660 ro 0 0\n",
+    );
+    assert_eq!(restarting(&w), (false, true));
+}
+
+#[test]
+fn restart_is_direct_when_systemctl_fails() {
+    let mut w = World::new();
+    w.put("sys/class/block/sr0/size", b"7340032\n");
+    w.fake.fail = vec!["systemctl reboot"];
+    assert_eq!(restarting(&w), (true, true));
+}
+
+#[test]
+fn restart_without_a_live_medium_goes_through_systemd() {
+    let w = World::new();
+    w.put("proc/self/mounts", b"/dev/vda3 / btrfs rw 0 0\n");
+    assert_eq!(restarting(&w), (true, false));
+}
+
+#[test]
+fn restart_follows_ventoy_down_to_the_stick() {
+    let w = World::new();
+    w.put(
+        "proc/self/mounts",
+        b"/dev/mapper/ventoy /run/initramfs/live iso9660 ro 0 0\n",
+    );
+    w.put("dev/dm-0", b"");
+    fs::create_dir_all(w.env.root.join("dev/mapper")).unwrap();
+    std::os::unix::fs::symlink("../dm-0", w.env.root.join("dev/mapper/ventoy")).unwrap();
+    w.put("sys/class/block/dm-0/size", b"7340032\n");
+    w.put("sys/class/block/dm-0/dm/name", b"ventoy\n");
+    w.put("sys/class/block/dm-0/slaves/sdb1", b"");
+    w.put("sys/class/block/sdb1/size", b"62914560\n");
+    assert_eq!(restarting(&w), (true, false));
+    // pulled: the mapping stays, the stick under it doesn't
+    fs::remove_dir_all(w.env.root.join("sys/class/block/sdb1")).unwrap();
+    lock(&w.fake.calls).clear();
+    assert_eq!(restarting(&w), (false, true));
+}
+
+#[test]
+fn restart_follows_an_iso_file_down_to_its_disk() {
+    let w = World::new();
+    w.put(
+        "proc/self/mounts",
+        b"/dev/sdb1 /run/initramfs/isoscan exfat ro 0 0\n\
+          /dev/loop0 /run/initramfs/live iso9660 ro 0 0\n",
+    );
+    w.put("dev/sdb1", b"");
+    w.put("dev/loop0", b"");
+    w.put("sys/class/block/loop0/size", b"7340032\n");
+    w.put(
+        "sys/class/block/loop0/loop/backing_file",
+        b"/run/initramfs/isoscan/isos/atlasos.iso\n",
+    );
+    w.put("sys/class/block/sdb1/size", b"62914560\n");
+    assert_eq!(restarting(&w), (true, false));
+    fs::remove_dir_all(w.env.root.join("sys/class/block/sdb1")).unwrap();
+    fs::remove_file(w.env.root.join("dev/sdb1")).unwrap();
+    lock(&w.fake.calls).clear();
+    assert_eq!(restarting(&w), (false, true));
+}
+
+#[test]
+fn a_direct_restart_unmounts_what_is_left_of_the_target() {
+    let w = World::new();
+    let t = w.env.target.display().to_string();
+    w.put(
+        "proc/self/mounts",
+        format!(
+            "/dev/sr0 /run/initramfs/live iso9660 ro 0 0\n\
+             /dev/sda3 {t} btrfs rw 0 0\n\
+             /dev/sda2 {t}/boot ext4 rw 0 0\n\
+             /dev/sda1 {t}/boot/efi vfat rw 0 0\n\
+             /dev/sda4 {t}-other ext4 rw 0 0\n\
+             tmpfs {t}/boot/efi tmpfs rw 0 0\n"
+        )
+        .as_bytes(),
+    );
+    w.put("sys/class/block/sr0/size", b"0\n");
+    assert_eq!(restarting(&w), (false, true));
+    assert_eq!(
+        lock(&w.fake.restarted).clone().unwrap(),
+        // the tmpfs stacked on the ESP, then the ESP under it
+        [
+            format!("{t}/boot/efi"),
+            format!("{t}/boot/efi"),
+            format!("{t}/boot"),
+            t.clone()
+        ]
+    );
 }

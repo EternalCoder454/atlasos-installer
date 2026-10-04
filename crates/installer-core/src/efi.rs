@@ -17,6 +17,20 @@ const BOOTUPD_LABEL: &str = "Fedora";
 /// The loader bootupd registers, as efibootmgr's `--loader` takes it.
 pub const SHIM: &str = r"\EFI\fedora\shimx64.efi";
 
+/// The `BootOrder:` line of `efibootmgr`, as entry numbers.
+pub fn boot_order(out: &str) -> Vec<String> {
+    out.lines()
+        .find_map(|line| line.strip_prefix("BootOrder:"))
+        .map(|order| {
+            order
+                .split(',')
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Parse `efibootmgr`: `Boot0005* Fedora\tHD(...)`. efibootmgr 18 prints
 /// the device path without `-v` (checked in the VM); older versions need
 /// `-v`, and without a path no entry is ever found stale.
@@ -59,6 +73,15 @@ pub fn stale_entries<'a>(entries: &'a [BootEntry], partuuid: &str) -> Vec<&'a Bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boot_order_lists_the_numbers() {
+        assert_eq!(
+            boot_order(OUT),
+            ["0005", "0002", "0004", "0003", "0000", "0001"]
+        );
+        assert!(boot_order("BootCurrent: 0002\n").is_empty());
+    }
 
     // From spike S3: Windows and AtlasOS sharing an ESP.
     const OUT: &str = "BootCurrent: 0002\nTimeout: 0 seconds\nBootOrder: 0005,0002,0004,0003,0000,0001\n\

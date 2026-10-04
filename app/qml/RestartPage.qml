@@ -18,9 +18,11 @@ InstallerPage {
     readonly property string mok: page.result.mokPassword || ""
 
     title: qsTr("AtlasOS is installed")
-    subtitle: page.result.bootMedia === "cd" ? qsTr("Take out the disc, then restart.")
-            : page.result.bootMedia === "usb" ? qsTr("Remove the USB stick, then restart.")
-            : qsTr("Remove the USB stick or disc you started from, then restart.")
+    // Afterwards, not before: the helper restarts without the stick, but the
+    // firmware is told to start AtlasOS next either way, so it can stay in.
+    subtitle: page.result.bootMedia === "cd" ? qsTr("Restart, then take out the disc while AtlasOS starts.")
+            : page.result.bootMedia === "usb" ? qsTr("Restart, then take out the USB stick while AtlasOS starts.")
+            : qsTr("Restart, then take out the USB stick or disc you started from.")
     backVisible: false
     primaryText: page.backend.rebooting ? qsTr("Restarting…") : qsTr("Restart")
     primaryEnabled: !page.backend.rebooting

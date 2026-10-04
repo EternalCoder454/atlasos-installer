@@ -180,7 +180,7 @@ fn live_sources(env: &Env) -> Vec<String> {
     let mounts = fs::read_to_string(env.host("proc/self/mounts")).unwrap_or_default();
     let mut out = disks::live_sources(&mounts);
     for src in out.clone() {
-        if let Ok(real) = fs::canonicalize(env.host(&src))
+        if let Ok(real) = fs::canonicalize(env.host(src.trim_start_matches('/')))
             && let Ok(rel) = real.strip_prefix(&env.root)
         {
             let real = format!("/{}", rel.display());
@@ -681,6 +681,105 @@ fn queue_mok(r: &dyn Runner, env: &Env) -> Result<String, String> {
     result.map(|_| pw)
 }
 
+/// Whether the medium the live system runs from is still there: false once
+/// the USB stick is pulled (its block device goes away, and the by-label
+/// link with it) or the disc is ejected (the drive stays, with a size of
+/// 0). True when not running from a live medium at all.
+pub fn live_medium_present(env: &Env) -> bool {
+    let mounts = fs::read_to_string(env.host("proc/self/mounts")).unwrap_or_default();
+    disks::live_sources(&mounts).iter().all(|src| {
+        fs::canonicalize(env.host(src.trim_start_matches('/')))
+            .ok()
+            .and_then(|real| real.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .is_some_and(|name| device_present(env, &mounts, &name, 0))
+    })
+}
+
+/// Whether block device `name` can still be read. A device-mapper device
+/// (Ventoy's) and a loop device (an ISO file booted with iso-scan) outlive
+/// the stick under them, so for those it is whether what they read from is
+/// there.
+fn device_present(env: &Env, mounts: &str, name: &str, depth: u32) -> bool {
+    let dir = env.host(&format!("sys/class/block/{name}"));
+    let sized = fs::read_to_string(dir.join("size"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .is_some_and(|size| size > 0);
+    if !sized || depth > 8 {
+        return sized;
+    }
+    let slaves: Vec<String> = fs::read_dir(dir.join("slaves"))
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    if !slaves.is_empty() || dir.join("dm").exists() {
+        return !slaves.is_empty()
+            && slaves
+                .iter()
+                .all(|s| device_present(env, mounts, s, depth + 1));
+    }
+    let Ok(file) = fs::read_to_string(dir.join("loop/backing_file")) else {
+        return true;
+    };
+    let file = file.trim_end_matches('\n').trim_end_matches(" (deleted)");
+    // The file's filesystem: the mount with the longest matching mount point.
+    let holder = mounts
+        .lines()
+        .filter_map(|line| {
+            let mut f = line.split_whitespace();
+            let (dev, dir) = (disks::unescape(f.next()?), disks::unescape(f.next()?));
+            let inside = dir == "/" || file == dir || file.starts_with(&format!("{dir}/"));
+            inside.then_some((dir.len(), dev))
+        })
+        .max_by_key(|&(len, _)| len)
+        .map(|(_, dev)| dev);
+    match holder
+        .as_deref()
+        .and_then(|dev| fs::canonicalize(env.host(dev.trim_start_matches('/'))).ok())
+    {
+        Some(real) => real
+            .file_name()
+            .is_some_and(|n| device_present(env, mounts, &n.to_string_lossy(), depth + 1)),
+        // a filesystem with no device (tmpfs): nothing to pull out
+        None => holder.is_some_and(|dev| !dev.starts_with("/dev/")),
+    }
+}
+
+/// Restart the computer. With the live medium there, cleanly, through
+/// systemd. Without it, systemctl can't start (it is on the medium), and
+/// even systemd's own shutdown ends by starting systemd-shutdown from it,
+/// which would leave the computer hanging. So then: unmount whatever of the
+/// installed disk is still mounted (normally nothing: the install unmounts
+/// it, but that can fail), write out the disks and restart through the
+/// kernel. The live session itself keeps nothing.
+pub fn restart(r: &dyn Runner, env: &Env) -> Result<(), String> {
+    if live_medium_present(env) {
+        match run(r, Cmd::new(bin::SYSTEMCTL, ["reboot"])) {
+            Ok(_) => return Ok(()),
+            // pulled since, or broken some other way
+            Err(e) => eprintln!(
+                "atlas-installer-helper: systemctl reboot failed, restarting directly: {e}"
+            ),
+        }
+    }
+    let mounts = fs::read_to_string(env.host("proc/self/mounts")).unwrap_or_default();
+    let target = env.target.to_string_lossy();
+    let mut under: Vec<String> = mounts
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .map(disks::unescape)
+        .filter(|dir| *dir == *target || dir.starts_with(&format!("{target}/")))
+        .collect();
+    // The deepest first. A mount point can be stacked: one unmount per
+    // mount, the top (later in the list) first.
+    under.reverse();
+    under.sort_by_key(|dir| std::cmp::Reverse(dir.len()));
+    r.restart_now(&under)
+}
+
 /// Replace bootupd's "Fedora" firmware entry for our ESP with "AtlasOS".
 /// The new entry is made first, so a failure never leaves none. `Err`: no
 /// AtlasOS entry was made; `Ok` lists old entries that could not be removed.
@@ -719,7 +818,35 @@ fn rename_boot_entry(r: &dyn Runner, plan: &Plan, after: &Table) -> Result<Vec<S
         ),
     )?;
     let mut warnings = Vec::new();
-    for num in old {
+    // Creating the entry puts it first in the boot order, but some firmware
+    // still starts a USB stick first while one is plugged in. BootNext wins
+    // over both, once, so the restart reaches AtlasOS even with the stick
+    // left in. The new entry is the first in the order (efibootmgr may also
+    // have reused an old one: then that one is kept, below).
+    let new = run(r, Cmd::new(bin::EFIBOOTMGR, Vec::<String>::new()))
+        .ok()
+        .and_then(|list| {
+            let first = efi::boot_order(&list.stdout).into_iter().next()?;
+            let entries = efi::parse(&list.stdout);
+            efi::stale_entries(&entries, &partuuid)
+                .into_iter()
+                .find(|e| e.num == first && e.label == efi::LABEL)
+                .map(|e| e.num.clone())
+        });
+    let next = match &new {
+        Some(num) => run(
+            r,
+            Cmd::new(bin::EFIBOOTMGR, ["--quiet", "--bootnext", num.as_str()]),
+        )
+        .map(drop),
+        None => Err("the new entry is not first in the firmware's boot order".into()),
+    };
+    if let Err(e) = next {
+        warnings.push(format!(
+            "The firmware wasn't told to start AtlasOS next, so take out the USB stick or disc before the computer restarts: {e}"
+        ));
+    }
+    for num in old.into_iter().filter(|num| Some(num) != new.as_ref()) {
         if let Err(e) = run(
             r,
             Cmd::new(

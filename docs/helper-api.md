@@ -95,8 +95,9 @@ Install returns this JSON:
 ```
 
 `boot_media` is what the installer was started from, so the UI can say
-what to remove before restarting: an optical drive, a USB disk, or neither
-(an internal disk, or not found).
+what to take out once the computer restarts: an optical drive, a USB disk,
+or neither (an internal disk, or not found). The install sets the
+firmware's BootNext to the new AtlasOS entry, so leaving it in is safe.
 
 `warnings` covers things that went wrong without failing the install: the
 firmware entry could not be renamed, an SELinux label was not set, the NVIDIA
@@ -160,6 +161,13 @@ session is allowed without authentication.
 Reboot is refused while an install is running. Once the reboot has started,
 the helper refuses all disk calls, and no longer exits when idle, so that a
 slow shutdown does not lose the flag.
+
+People take the USB stick or disc out before they press Restart, and then
+`systemctl reboot` and the shutdown after it can't read the programs they
+need. So when the live medium is gone (its device has vanished or has no
+size), or `systemctl reboot` fails, the helper syncs the disks and restarts
+straight through the kernel. It locks itself in memory at startup so that
+this path needs nothing from the medium.
 
 ## Signal
 

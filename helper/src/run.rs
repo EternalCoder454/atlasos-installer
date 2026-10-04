@@ -164,6 +164,16 @@ pub fn tail(s: &str, max: usize) -> String {
 /// `Err` only if it could not be run or ran out of time.
 pub trait Runner: Send + Sync {
     fn run(&self, cmd: &Cmd, on_line: &mut dyn FnMut(Option<&str>)) -> Result<Output, String>;
+
+    /// Unmount `unmount` (deepest first), write out the disks and restart
+    /// at once, through the kernel, without stopping anything else first.
+    /// Returns only on failure. For when the live
+    /// medium is gone: `systemctl reboot` and the clean shutdown after it
+    /// need programs from the medium (see `install::restart`).
+    fn restart_now(&self, unmount: &[String]) -> Result<(), String> {
+        let _ = unmount;
+        Err("this runner can't restart the computer".into())
+    }
 }
 
 /// Run `cmd` and require exit status 0.
@@ -242,6 +252,31 @@ fn read_lines(r: impl Read, tx: mpsc::Sender<(bool, Event)>, is_err: bool) {
 }
 
 impl Runner for SystemRunner {
+    fn restart_now(&self, unmount: &[String]) -> Result<(), String> {
+        for dir in unmount {
+            let Ok(c) = std::ffi::CString::new(dir.as_str()) else {
+                continue;
+            };
+            // SAFETY: c is a valid C string for both calls. A lazy unmount
+            // if busy: with nothing using it, it is written out at once.
+            unsafe {
+                if libc::umount2(c.as_ptr(), 0) != 0 {
+                    libc::umount2(c.as_ptr(), libc::MNT_DETACH);
+                }
+            }
+        }
+        // SAFETY: sync and reboot take no pointers; reboot returns only if
+        // it failed
+        unsafe {
+            libc::sync();
+            libc::reboot(libc::RB_AUTOBOOT);
+        }
+        Err(format!(
+            "the kernel refused to restart: {}",
+            std::io::Error::last_os_error()
+        ))
+    }
+
     fn run(&self, cmd: &Cmd, on_line: &mut dyn FnMut(Option<&str>)) -> Result<Output, String> {
         let mut child = Command::new(cmd.program)
             .args(&cmd.args)
