@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import Atlas.Ui
 
 // A row in a ListFrame: icon, title and subtitle, trailing items, and a
 // checkmark when selected. Draws its separator from its index, which works
@@ -55,18 +56,18 @@ FocusScope {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 3
-        radius: 7
-        color: row.selected ? Qt.alpha(Kirigami.Theme.highlightColor, 0.14) : Qt.alpha(Kirigami.Theme.textColor, tap.pressed ? 0.1 : 0.05)
+        radius: AtlasStyle.radius
+        color: row.selected ? AtlasStyle.selection : Qt.alpha(Kirigami.Theme.textColor, tap.pressed ? 0.1 : 0.05)
         opacity: row.selected || (row.clickable && hover.hovered) ? 1 : 0
     }
-    Rectangle {
+    Item {
         anchors.fill: parent
         anchors.margins: 3
-        radius: 7
-        color: "transparent"
-        border.width: 2
-        border.color: Qt.alpha(Kirigami.Theme.highlightColor, 0.6)
-        visible: row.ListView.isCurrentItem && row.ListView.view.activeFocus
+        AtlasFocusRing {
+            shown: row.ListView.isCurrentItem && row.ListView.view.activeFocus
+            gap: 0
+            radius: AtlasStyle.radius
+        }
     }
 
     HoverHandler {
@@ -134,7 +135,7 @@ FocusScope {
             visible: row.selected
             source: "checkmark"
             isMask: true
-            color: Kirigami.Theme.highlightColor
+            color: AtlasStyle.accent
             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
             Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
         }

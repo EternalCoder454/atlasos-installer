@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import Atlas.Ui
 
 // A rounded, raised box with a scrolling list inside (the Section look, for
 // lists too long to lay out in full). Use ListRow as the delegate.
@@ -13,7 +14,7 @@ Rectangle {
     property alias list: list
     property string emptyText
 
-    radius: 10
+    radius: AtlasStyle.radiusLarge
     color: Kirigami.Theme.backgroundColor.hslLightness > 0.5 ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.5) : Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(1, 1, 1, 0.06))
     border.width: 1
     border.color: Qt.alpha(Kirigami.Theme.textColor, 0.12)

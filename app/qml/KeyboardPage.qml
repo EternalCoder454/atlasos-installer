@@ -23,7 +23,7 @@ InstallerPage {
     readonly property string variantId: page.app.keymap.includes("(") ? page.app.keymap.split("(")[1].replace(")", "") : ""
     readonly property var layout: page.layouts.find(l => l.id === page.layoutId) || null
     readonly property var filtered: {
-        const q = search.text.trim().toLowerCase();
+        const q = search.query.trim().toLowerCase();
         if (q.length === 0) {
             return page.layouts;
         }
@@ -54,11 +54,14 @@ InstallerPage {
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: Kirigami.Units.largeSpacing
 
-        ListSearchField {
+        SearchField {
             id: search
+            Layout.fillWidth: true
             placeholderText: qsTr("Search layouts")
-            onDown: frame.list.forceActiveFocus()
+            Keys.onDownPressed: frame.list.forceActiveFocus()
             onAccepted: {
+                // Enter before the pause ends filters on what was typed.
+                search.query = search.text;
                 if (page.filtered.length > 0) {
                     page.set(page.filtered[0].id);
                 }

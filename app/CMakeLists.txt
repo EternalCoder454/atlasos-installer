@@ -51,7 +51,7 @@ qt_add_qml_module(atlas-installer-app
     VERSION 1.0
     SOURCES cpp/localeinfo.h cpp/localeinfo.cpp
     QML_FILES
-        qml/Main.qml qml/InstallerPage.qml qml/ListSearchField.qml qml/ChoiceCard.qml qml/Note.qml
+        qml/Main.qml qml/InstallerPage.qml qml/ChoiceCard.qml
         qml/ListFrame.qml qml/ListRow.qml qml/BrandPanel.qml qml/BackButton.qml
         qml/WelcomePage.qml qml/KeyboardPage.qml qml/WifiPage.qml qml/DiskPage.qml
         qml/ReviewPage.qml qml/ProgressPage.qml qml/RestartPage.qml

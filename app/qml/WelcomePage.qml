@@ -30,7 +30,7 @@ InstallerPage {
         return out;
     }
     readonly property var filtered: {
-        const q = search.text.trim().toLowerCase();
+        const q = search.query.trim().toLowerCase();
         if (q.length === 0) {
             return page.languages;
         }
@@ -61,11 +61,14 @@ InstallerPage {
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: Kirigami.Units.largeSpacing
 
-        ListSearchField {
+        SearchField {
             id: search
+            Layout.fillWidth: true
             placeholderText: qsTr("Search languages")
-            onDown: frame.list.forceActiveFocus()
+            Keys.onDownPressed: frame.list.forceActiveFocus()
             onAccepted: {
+                // Enter before the pause ends filters on what was typed.
+                search.query = search.text;
                 if (page.filtered.length > 0) {
                     page.choose(page.filtered[0].code);
                 }

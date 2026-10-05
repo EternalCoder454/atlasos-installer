@@ -86,31 +86,31 @@ InstallerPage {
                 }
             }
 
-            Note {
+            InfoBanner {
                 Layout.fillWidth: true
-                visible: page.disk !== null
-                kind: page.losesData ? "warning" : "info"
+                shown: page.disk !== null
+                type: page.losesData ? "warning" : "info"
                 text: !page.disk ? "" : !page.erase ? page.disk.reviewFree : page.losesData ? page.disk.reviewErase + " " + qsTr("This can't be undone.") : page.disk.reviewErase
             }
 
-            Note {
+            InfoBanner {
                 Layout.fillWidth: true
-                visible: page.app.backend.nvidia && page.app.backend.secureBoot
-                kind: "info"
+                shown: page.app.backend.nvidia && page.app.backend.secureBoot
+                type: "info"
                 text: qsTr("Secure Boot is on, so the NVIDIA driver needs the AtlasOS key. After the restart, a blue screen asks you to enroll it, once. The last page shows the password and the steps.")
             }
 
-            Note {
+            InfoBanner {
                 Layout.fillWidth: true
-                visible: page.app.installRefusal.length > 0
-                kind: "error"
+                shown: page.app.installRefusal.length > 0
+                type: "error"
                 text: page.app.installRefusal
             }
 
-            Note {
+            InfoBanner {
                 Layout.fillWidth: true
-                visible: page.disk !== null && page.disk.note.length > 0
-                kind: "warning"
+                shown: page.disk !== null && page.disk.note.length > 0
+                type: "warning"
                 text: page.disk ? page.disk.note : ""
             }
 

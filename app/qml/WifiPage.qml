@@ -145,7 +145,7 @@ InstallerPage {
         RowLayout {
             spacing: Kirigami.Units.largeSpacing
             Layout.fillWidth: true
-            Kirigami.PasswordField {
+            AtlasPasswordField {
                 id: password
                 Layout.fillWidth: true
                 placeholderText: qsTr("Password")
@@ -232,10 +232,10 @@ InstallerPage {
             }
         }
 
-        Note {
+        InfoBanner {
             Layout.fillWidth: true
-            visible: page.app.backend.wifiError.length > 0
-            kind: "error"
+            shown: page.app.backend.wifiError.length > 0
+            type: "error"
             text: page.app.backend.wifiError
         }
     }

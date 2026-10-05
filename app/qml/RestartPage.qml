@@ -73,8 +73,8 @@ InstallerPage {
                         Layout.alignment: Qt.AlignHCenter
                         implicitWidth: Math.min(keyColumn.implicitWidth + Kirigami.Units.gridUnit * 2, parent.width)
                         implicitHeight: keyColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
-                        radius: 8
-                        color: Qt.alpha(Kirigami.Theme.highlightColor, 0.12)
+                        radius: AtlasStyle.radiusLarge
+                        color: AtlasStyle.selection
                         ColumnLayout {
                             id: keyColumn
                             anchors.centerIn: parent
@@ -88,8 +88,8 @@ InstallerPage {
                                     readOnly: true
                                     selectByMouse: true
                                     color: Kirigami.Theme.textColor
-                                    selectionColor: Kirigami.Theme.highlightColor
-                                    selectedTextColor: Kirigami.Theme.highlightedTextColor
+                                    selectionColor: AtlasStyle.accent
+                                    selectedTextColor: AtlasStyle.accentText
                                     font.family: "monospace"
                                     font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
                                     font.weight: Font.DemiBold
@@ -168,8 +168,8 @@ InstallerPage {
                         Layout.topMargin: Kirigami.Units.smallSpacing
                         implicitWidth: pw.implicitWidth + Kirigami.Units.gridUnit * 2
                         implicitHeight: pw.implicitHeight + Kirigami.Units.largeSpacing * 2
-                        radius: 8
-                        color: Qt.alpha(Kirigami.Theme.highlightColor, 0.12)
+                        radius: AtlasStyle.radiusLarge
+                        color: AtlasStyle.selection
                         QQC2.Label {
                             id: pw
                             anchors.centerIn: parent
@@ -198,10 +198,10 @@ InstallerPage {
                 }
             }
 
-            Note {
+            InfoBanner {
                 Layout.fillWidth: true
-                visible: page.backend.rebootError.length > 0
-                kind: "error"
+                shown: page.backend.rebootError.length > 0
+                type: "error"
                 text: page.backend.rebootError
             }
 

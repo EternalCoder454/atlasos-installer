@@ -106,7 +106,7 @@ InstallerPage {
                 visible: page.diskState === "error" || page.diskState === "ready" && page.disks.length === 0
                 Layout.topMargin: Kirigami.Units.gridUnit * 2
                 iconName: page.diskState === "error" ? "window-close-symbolic" : "drive-harddisk-symbolic"
-                tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.highlightColor
+                tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : AtlasStyle.accent
                 headline: page.diskState === "error" ? qsTr("Couldn't read the disks") : qsTr("No disk found")
                 subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("AtlasOS needs a disk of at least %1. Connect one, then look again.").arg(page.backend.minDiskSize)
                 SecondaryButton {
@@ -194,10 +194,10 @@ InstallerPage {
                     wrapMode: Text.Wrap
                     opacity: 0.65
                 }
-                Note {
+                InfoBanner {
                     Layout.fillWidth: true
-                    visible: page.disk !== null && page.disk.note.length > 0
-                    kind: "warning"
+                    shown: page.disk !== null && page.disk.note.length > 0
+                    type: "warning"
                     text: page.disk ? page.disk.note : ""
                 }
             }
@@ -236,7 +236,7 @@ InstallerPage {
 
                     readonly property bool pin: page.app.encryption === "tpm-pin"
 
-                    Kirigami.PasswordField {
+                    AtlasPasswordField {
                         id: secretField
                         Layout.fillWidth: true
                         placeholderText: secretBox.pin ? qsTr("PIN") : qsTr("Password")
@@ -245,7 +245,7 @@ InstallerPage {
                         onTextChanged: page.app.password = text
                         onAccepted: confirmField.forceActiveFocus()
                     }
-                    Kirigami.PasswordField {
+                    AtlasPasswordField {
                         id: confirmField
                         Layout.fillWidth: true
                         placeholderText: secretBox.pin ? qsTr("Confirm PIN") : qsTr("Confirm password")
@@ -265,10 +265,10 @@ InstallerPage {
                 }
             }
 
-            Note {
+            InfoBanner {
                 Layout.fillWidth: true
-                visible: encryptionSection.visible && page.backend.tpm2 && page.app.encrypt && page.backend.secureBootOff
-                kind: "warning"
+                shown: encryptionSection.visible && page.backend.tpm2 && page.app.encrypt && page.backend.secureBootOff
+                type: "warning"
                 text: qsTr("Secure Boot is off on this PC. Turn it on in the firmware settings for full protection.")
             }
 

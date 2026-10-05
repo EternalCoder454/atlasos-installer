@@ -102,10 +102,10 @@ InstallerPage {
             font: Kirigami.Theme.smallFont
             text: qsTr("The install log is at /run/atlas-installer/install.log until the computer restarts.")
         }
-        Note {
+        InfoBanner {
             Layout.fillWidth: true
-            visible: page.backend.rebootError.length > 0
-            kind: "error"
+            shown: page.backend.rebootError.length > 0
+            type: "error"
             text: page.backend.rebootError
         }
     }
