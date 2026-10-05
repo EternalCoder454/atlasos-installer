@@ -7,6 +7,14 @@
 #   tests/vm/windows.sh [path to Windows 11 ISO]
 set -euo pipefail
 
+# Checked before anything is made. Digits only: $(( )) would evaluate
+# anything else as an expression.
+limit=${WIN_TIMEOUT:-5400}
+[[ $limit =~ ^[0-9]+$ ]] || {
+	echo "windows.sh: WIN_TIMEOUT must be a number of seconds" >&2
+	exit 2
+}
+
 iso=$(realpath "${1:-$HOME/VMs/Win11_25H2_English_x64_v2.iso}")
 cd "$(dirname "$0")/../.."
 export LIBVIRT_DEFAULT_URI=qemu:///system
@@ -49,10 +57,10 @@ virsh send-key "$dom" KEY_ENTER >/dev/null
 echo ">> Installing Windows; waiting for the VM to power off"
 # About 20 minutes normally. Past WIN_TIMEOUT seconds Setup has hung: stop
 # the VM and remove the half-made base, so no test runs on it.
-deadline=$((SECONDS + ${WIN_TIMEOUT:-5400}))
+deadline=$((SECONDS + limit))
 while [ "$(virsh domstate "$dom")" != "shut off" ]; do
 	if [ "$SECONDS" -ge "$deadline" ]; then
-		echo "windows.sh: Setup still running after ${WIN_TIMEOUT:-5400} s; stopping it" >&2
+		echo "windows.sh: Setup still running after $limit s; stopping it" >&2
 		virsh destroy "$dom" >/dev/null 2>&1 || true
 		virsh undefine "$dom" --nvram --tpm >/dev/null 2>&1 || true
 		rm -f "$base"

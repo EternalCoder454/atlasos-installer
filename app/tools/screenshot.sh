@@ -15,6 +15,11 @@ flags=${3:-1}
 theme=${4:-light}
 wait=${5:-3}
 bin=${BIN:-build/app/atlas-installer}
+limit=${SHOT_TIMEOUT:-300}
+[[ $limit =~ ^[0-9]+$ ]] || {
+	echo "screenshot.sh: SHOT_TIMEOUT must be a number of seconds" >&2
+	exit 2
+}
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -69,5 +74,5 @@ env XDG_CONFIG_HOME="$tmp/config" XDG_DATA_HOME="$tmp/data" \
     XDG_CACHE_HOME="$tmp/cache" XDG_RUNTIME_DIR="$tmp/runtime" \
     QT_QPA_PLATFORM=xcb QT_SCALE_FACTOR="${SCALE:-1}" \
     ATLAS_INSTALLER_DEMO="$flags" ATLAS_INSTALLER_DEMO_PAGE="$step" \
-    timeout -k 10 "${SHOT_TIMEOUT:-300}" \
+    timeout -k 10 "$limit" \
     dbus-run-session -- xvfb-run -a -s "-screen 0 2560x1600x24" "$tmp/run.sh"
