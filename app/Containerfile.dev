@@ -8,7 +8,7 @@ FROM registry.fedoraproject.org/fedora:44
 
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf -y -q --setopt=keepcache=1 --setopt=install_weak_deps=False install \
-        cargo rust clippy rustfmt gcc gcc-c++ cmake ninja-build corrosion \
+        cargo rust clippy rustfmt gcc gcc-c++ ccache cmake ninja-build corrosion \
         qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg qt6-qtwayland \
         kf6-kirigami-devel kf6-qqc2-desktop-style kf6-kcolorscheme \
         breeze-icon-theme plasma-breeze-qt6 google-noto-sans-fonts ibm-plex-sans-fonts \

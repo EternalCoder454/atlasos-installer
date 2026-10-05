@@ -28,6 +28,18 @@ Phase 0 results are in Atlas Notes, under `AtlasOS/Atlas Installer/Roadmap`.
   atlas-framework (`../Atlas Framework`, or `ATLAS_FRAMEWORK_SRC`), which
   `app/dev.sh` builds into its image. Change it there, never copy it here.
 - `iso/`, `live/`: the live ISO build. `tests/vm/`: the VM test tools.
+- `.github/workflows/`: CI, on GitHub only (never run it locally).
+  `rust.yml` covers the workspace. `ui.yml` covers `app/`, plus
+  atlas-framework's app checks:
+  - it runs in the dev image, which only main publishes on GHCR
+    (`ghcr.io/eternalcoder454/atlas-installer-dev`);
+  - `.github/ci/dev-image.sh` builds the image, and its tag hashes
+    everything that goes in;
+  - `.github/ci/dev-run.sh` runs the steps with no capabilities and no
+    network.
+
+  Actions are pinned by SHA, and atlas-framework by commit (`FRAMEWORK_SHA`,
+  v1.4.0). A new Atlas.Ui release changes both spots in `ui.yml`.
 
 ## Commands
 

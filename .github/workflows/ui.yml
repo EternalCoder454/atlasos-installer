@@ -1,0 +1,230 @@
+name: UI
+
+# The installer UI (app/): Rust over CXX-Qt with QML, which needs Qt,
+# Kirigami and Atlas.Ui. It builds in the dev image (.github/ci/dev-image.sh),
+# kept prebuilt on GHCR and rebuilt only when what goes into it changes. The
+# ISO build is AtlasOS's iso.yml, not this.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - app/**
+      - crates/installer-core/**
+      # installer-core takes its edition and rust-version from the workspace.
+      - Cargo.toml
+      - .github/ci/**
+      - .github/workflows/ui.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+    inputs:
+      rebuild-image:
+        description: Rebuild the dev image even when it is on GHCR (for Fedora updates; main only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A newer push cancels a pull request's run, never main's: main's runs
+# publish the image and the caches.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # atlas-framework v1.4.0: the Atlas.Ui the UI is built and checked against.
+  # By commit, as a tag can move. The app checks below pin the same commit.
+  FRAMEWORK_SHA: 7a114a112bd1fff4fe3d6facc81b0a81e5d2db30
+
+jobs:
+  # atlas-framework's design rules (no default buttons, no QML file named
+  # like an Atlas.Ui type).
+  atlas:
+    name: Atlas app checks
+    uses: EternalCoder454/atlas-framework/.github/workflows/app-checks.yml@7a114a112bd1fff4fe3d6facc81b0a81e5d2db30 # v1.4.0
+    with:
+      framework-ref: 7a114a112bd1fff4fe3d6facc81b0a81e5d2db30
+
+  # Only main publishes the dev image, and only this job can write packages.
+  image:
+    name: Dev image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish the dev image if it is missing
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REBUILD: ${{ inputs.rebuild-image }}
+        run: |
+          # The login lives in a config of its own, used only by the commands
+          # that need it (not the build, which needs buildx from the default
+          # one) and removed on exit.
+          auth=$RUNNER_TEMP/docker-publish
+          trap 'rm -rf "$auth"' EXIT
+          image=$(.github/ci/dev-image.sh name)
+          printf '%s\n' "$TOKEN" | docker --config "$auth" login ghcr.io -u "$GITHUB_ACTOR" --password-stdin ||
+            echo "::warning::GHCR login failed"
+          if [ "$REBUILD" != true ] && docker --config "$auth" manifest inspect "$image" >/dev/null 2>&1; then
+            echo "Dev image $image is on GHCR" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          .github/ci/dev-image.sh build
+          # Not fatal: the UI job then builds the image itself.
+          if docker --config "$auth" push -q "$image"; then
+            echo "Dev image $image built and pushed" >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Pushing $image failed"
+          fi
+
+  ui:
+    name: fmt, clippy, tests, build, qmllint
+    needs: image
+    # After the image job, which is skipped off main. When it fails, this
+    # job builds the image itself.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Before the image and any build: a format slip fails in seconds.
+      # rustfmt needs no Qt, so it runs here, at Fedora 44's Rust.
+      - name: Format
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal -c rustfmt
+          cd app && cargo +1.98.1 fmt --check
+
+      # Code built or run in the container could change the workspace, so
+      # the host runs this copy, made before any container starts.
+      - name: Container runner
+        run: install -m 0755 .github/ci/dev-run.sh "$RUNNER_TEMP/dev-run.sh"
+
+      # Pulled from GHCR, or built here (never pushed) when it isn't there,
+      # as on a pull request that changes it.
+      - name: Dev image
+        id: image
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          auth=$RUNNER_TEMP/docker-pull
+          trap 'rm -rf "$auth"' EXIT
+          image=$(.github/ci/dev-image.sh name)
+          echo "IMAGE=$image" >>"$GITHUB_ENV"
+          echo "tag=${image##*:}" >>"$GITHUB_OUTPUT"
+          # ccache's key changes weekly, so its saves stay few.
+          echo "week=$(date -u +%G-%V)" >>"$GITHUB_OUTPUT"
+          printf '%s\n' "$TOKEN" | docker --config "$auth" login ghcr.io -u "$GITHUB_ACTOR" --password-stdin ||
+            echo "::warning::GHCR login failed"
+          if docker --config "$auth" pull -q "$image"; then
+            echo "Dev image $image from GHCR" >>"$GITHUB_STEP_SUMMARY"
+          else
+            .github/ci/dev-image.sh build
+            echo "Dev image $image built here" >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Cargo's downloads and built dependencies, per dev image and lock file:
+      # saved once per key, and never restored from another key, so stale
+      # artifacts don't pile up. Corrosion builds into
+      # build/app/cargo, apart from cargo test's target.
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cache/cargo
+            ${{ runner.temp }}/cache/target
+            build/app/cargo
+          key: ui-cargo-${{ steps.image.outputs.tag }}-${{ hashFiles('app/Cargo.lock') }}
+
+      # ccache bounds its own size (CCACHE_MAXSIZE). Main saves it once a
+      # week, on the first run that compiled something new.
+      - name: Restore ccache
+        id: ccache-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/ccache
+          key: ui-ccache-${{ steps.image.outputs.tag }}-${{ steps.image.outputs.week }}
+          restore-keys: ui-ccache-${{ steps.image.outputs.tag }}-
+
+      # The only step with network: every later one runs offline. It fetches
+      # every platform's crates, since Corrosion's cargo metadata reads them
+      # all. It also zeroes ccache's counters, so the statistics cover this run.
+      - name: Fetch crates
+        env:
+          DEV_NETWORK: bridge
+        run: |
+          "$RUNNER_TEMP/dev-run.sh" sh -c 'cd app && cargo fetch --locked && ccache -z >/dev/null'
+
+      - name: Clippy
+        run: |
+          "$RUNNER_TEMP/dev-run.sh" sh -c 'cd app && cargo clippy --all-targets --locked -- -D warnings'
+
+      - name: Tests
+        run: |
+          "$RUNNER_TEMP/dev-run.sh" sh -c 'cd app && cargo test --locked'
+
+      # Debug: the same compile and link checks as Release without thin LTO.
+      # The release build is the ISO's.
+      - name: Build
+        id: build
+        run: |
+          "$RUNNER_TEMP/dev-run.sh" sh -c 'cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache >/dev/null &&
+            cmake --build build/app'
+
+      - name: QML lint
+        run: |
+          "$RUNNER_TEMP/dev-run.sh" cmake --build build/app --target all_qmllint
+
+      - name: Cache statistics
+        id: ccache
+        if: always() && steps.cargo-cache.outcome == 'success'
+        env:
+          CARGO_HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
+          CARGO_KEY: ${{ steps.cargo-cache.outputs.cache-matched-key }}
+        run: |
+          {
+            echo "cargo cache: exact hit ${CARGO_HIT:-false}, restored ${CARGO_KEY:-nothing}"
+            echo '```'
+            "$RUNNER_TEMP/dev-run.sh" ccache -s || true
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          misses=$("$RUNNER_TEMP/dev-run.sh" ccache --print-stats | awk '$1 == "cache_miss" { print $2 }') || true
+          echo "misses=${misses:-0}" >>"$GITHUB_OUTPUT"
+
+      # Once the build has passed, even if a later check fails.
+      - name: Save cargo cache
+        if: >-
+          !cancelled() && github.ref == 'refs/heads/main' &&
+          steps.cargo-cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cache/cargo
+            ${{ runner.temp }}/cache/target
+            build/app/cargo
+          key: ui-cargo-${{ steps.image.outputs.tag }}-${{ hashFiles('app/Cargo.lock') }}
+
+      - name: Save ccache
+        if: >-
+          !cancelled() && github.ref == 'refs/heads/main' &&
+          steps.ccache-cache.outputs.cache-hit != 'true' &&
+          steps.ccache.outputs.misses != '' && steps.ccache.outputs.misses != '0'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/ccache
+          key: ui-ccache-${{ steps.image.outputs.tag }}-${{ steps.image.outputs.week }}

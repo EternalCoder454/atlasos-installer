@@ -1,0 +1,59 @@
+name: Rust
+
+# installer-core and the helper: the Cargo workspace at the top. The UI (app/)
+# has its own workflow, ui.yml.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - crates/**
+      - helper/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/rust.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Fedora 44's Rust, which builds the helper for the ISO and lints it in the
+  # container locally: the same clippy finds the same warnings.
+  RUSTUP_TOOLCHAIN: 1.98.1
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: fmt, clippy, tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal -c clippy,rustfmt
+
+      # Before the cache and any build: a format slip fails in seconds.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Pull requests read main's cache but never write their own.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # --locked: fails when Cargo.lock is out of date.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
