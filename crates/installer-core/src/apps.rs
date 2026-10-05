@@ -127,10 +127,10 @@ mod tests {
 
     #[test]
     fn record_holds_only_ids() {
-        let apps = validate(&ids(&["just", "brave"])).unwrap();
+        let apps = validate(&ids(&["gh", "brave"])).unwrap();
         assert_eq!(
             record(&apps),
-            "{\"apps\":[\"brave\",\"just\"],\"version\":1}\n"
+            "{\"apps\":[\"brave\",\"gh\"],\"version\":1}\n"
         );
     }
 }

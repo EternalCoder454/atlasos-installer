@@ -29,8 +29,9 @@ creates the enablement symlinks), `tests/`.
 ## Add an app
 
 Add one line to `apps.json` with an `install` of `flatpak:<app id>`, `mise`,
-`mise:<tool>` or `toolbox:<packages>`. `gh` and `just` come through mise's registry (with aqua checksum checks) at their
-latest version; only mise itself is pinned and hashed. To bump mise, change `MISE_VERSION` and
+`mise:<tool>` or `toolbox:<packages>`. `gh` comes through mise's registry
+(with aqua checksum checks) at its latest version; only mise itself is
+pinned and hashed. To bump mise, change `MISE_VERSION` and
 `MISE_SHA256` in the script together.
 
 ## Tests

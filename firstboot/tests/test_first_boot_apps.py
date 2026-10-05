@@ -171,15 +171,15 @@ class SystemMode(Base):
 
 class UserMode(Base):
     def test_installs_mise_tools_and_toolbox_then_remembers(self):
-        self.write_record(["gh", "just", "debug"])
+        self.write_record(["gh", "debug"])
         self.assertEqual(self.run_mode("user"), 0)
         mise = self.home / "bin" / "mise"
         self.assertTrue(mise.exists() and os.access(mise, os.X_OK))
-        self.assertTrue(self.calls("mise use -g gh just"))
+        self.assertTrue(self.calls("mise use -g gh"))
         self.assertTrue(self.calls("toolbox create -y -c fedora-toolbox-44"))
         self.assertTrue(self.calls("toolbox run -c fedora-toolbox-44 sudo dnf install -y gdb strace perf"))
         self.assertEqual(set((self.state / "first-boot-apps.done").read_text().split()),
-                         {"gh", "just", "debug"})
+                         {"gh", "debug"})
         self.assertEqual(len([c for c in self.calls("gdbus") if "Adding your apps" in c]), 1)
 
     def test_done_file_prevents_repeats(self):

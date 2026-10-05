@@ -3,7 +3,6 @@
   {"id": "firefox", "group": "browser", "name": "Firefox", "summary": "Mozilla's open web browser", "install": "flatpak:org.mozilla.firefox"},
   {"id": "mise", "group": "developer", "name": "mise", "summary": "Language runtimes: Node, Python, Go, Rust and more", "install": "mise"},
   {"id": "gh", "group": "developer", "name": "GitHub CLI", "summary": "GitHub from the terminal", "install": "mise:gh"},
-  {"id": "just", "group": "developer", "name": "just", "summary": "A handy way to save and run project commands", "install": "mise:just"},
   {"id": "debug", "group": "developer", "name": "Debugging tools", "summary": "gdb, strace and perf, in a toolbox", "install": "toolbox:gdb strace perf"},
   {"id": "vscode", "group": "developer", "name": "Visual Studio Code", "summary": "Microsoft's code editor", "install": "flatpak:com.visualstudio.code"}
 ]
