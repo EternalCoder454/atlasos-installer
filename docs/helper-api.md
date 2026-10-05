@@ -77,7 +77,7 @@ refused.
 | `keymap` | `de`, or `de(nodeadkeys)` with a variant. |
 | `wifi_uuid` | A NetworkManager connection to copy into the new system, or an empty string. |
 | `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false. |
-| `password` | For `password`: the disk password, 8 to 256 characters. For `tpm-pin`: the PIN, 6 to 64 characters. Printable ASCII only (space to `~`): the initramfs prompt can't reliably type anything else (keymaps, dead keys, normalisation). An empty string for `none` and `tpm`; anything else is refused. |
+| `password` | For `password`: the disk password, 8 to 256 characters. For `tpm-pin`: the PIN, 4 to 64 characters. Printable ASCII only (space to `~`): the initramfs prompt can't reliably type anything else (keymaps, dead keys, normalisation). An empty string for `none` and `tpm`; anything else is refused. |
 
 Install probes the disks again and decides everything before it writes
 anything. It refuses in these cases:

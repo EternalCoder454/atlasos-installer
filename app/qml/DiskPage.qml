@@ -258,7 +258,7 @@ InstallerPage {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         font: Kirigami.Theme.smallFont
-                        text: problem.length > 0 ? problem : secretBox.pin ? qsTr("Use at least 6 characters: letters without accents, numbers, spaces and symbols. At start-up, type it where it asks for the \"LUKS2 token PIN\". If you forget it, the recovery key opens the disk.") : qsTr("Use at least 8 characters: letters without accents, numbers, spaces and symbols. Write it down somewhere safe: if you forget it, only the recovery key opens the disk.")
+                        text: problem.length > 0 ? problem : secretBox.pin ? qsTr("Use at least 4 characters: letters without accents, numbers, spaces and symbols. At start-up, type it where it asks for the \"LUKS2 token PIN\". If you forget it, the recovery key opens the disk.") : qsTr("Use at least 8 characters: letters without accents, numbers, spaces and symbols. Write it down somewhere safe: if you forget it, only the recovery key opens the disk.")
                         color: problem.length > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                         opacity: problem.length > 0 ? 1 : 0.65
                     }

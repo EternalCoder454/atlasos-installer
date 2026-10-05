@@ -36,7 +36,7 @@ LUKS2. There are three ways to unlock it:
   protects your files if the disk is taken out of the PC, or the PC is sold
   or recycled.
 - **TPM and a PIN** ("Ask for a PIN when this PC starts"). As above, plus a
-  PIN (6 to 64 characters) at every start. This also protects your files if
+  PIN (4 to 64 characters) at every start. This also protects your files if
   the whole PC is stolen.
 - **Password** (PCs without a TPM; off by default). A password (8 to 256
   characters) at every start, and nothing else unlocks the disk.

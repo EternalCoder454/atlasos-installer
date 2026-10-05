@@ -1843,7 +1843,7 @@ fn requests_with_encryption_are_checked() {
     assert!(new("password", "12345678").is_ok());
     assert!(new("password", &"x".repeat(256)).is_ok(), "256 characters");
     assert!(new("password", "pass word  ~!").is_ok());
-    assert!(new("tpm-pin", "123456").is_ok());
+    assert!(new("tpm-pin", "1234").is_ok());
     assert!(new("tpm-pin", &"9".repeat(64)).is_ok());
     for (enc, pw) in [
         ("TPM", ""),
@@ -1859,7 +1859,7 @@ fn requests_with_encryption_are_checked() {
         ("password", "日本語のパスワードです"),
         ("password", "abcdefgh\u{a0}"),
         ("tpm-pin", ""),
-        ("tpm-pin", "12345"),
+        ("tpm-pin", "123"),
         ("tpm-pin", &"9".repeat(65)),
         ("tpm-pin", "12345é"),
         ("tpm-pin", "12345\n6"),

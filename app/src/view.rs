@@ -303,10 +303,10 @@ pub fn recovery_rows(key: &str) -> Vec<String> {
 
 /// The helper's rules for what is typed at start-up: printable ASCII only
 /// (0x20 to 0x7e), because the start-up prompt can't reliably type
-/// anything else. A password is 8 to 256 characters, a PIN 6 to 64.
+/// anything else. A password is 8 to 256 characters, a PIN 4 to 64.
 pub const PASSWORD_MIN: usize = 8;
 pub const PASSWORD_MAX: usize = 256;
-pub const PIN_MIN: usize = 6;
+pub const PIN_MIN: usize = 4;
 pub const PIN_MAX: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,7 +361,7 @@ pub fn secret_hint(mode: &str, s: &str, confirm: &str) -> String {
     let pin = mode == "tpm-pin";
     match problem_for(mode, s) {
         Some(SecretProblem::Empty) => String::new(),
-        Some(SecretProblem::TooShort) if pin => "Use at least 6 characters.".into(),
+        Some(SecretProblem::TooShort) if pin => "Use at least 4 characters.".into(),
         Some(SecretProblem::TooShort) => "Use at least 8 characters.".into(),
         Some(SecretProblem::TooLong) => {
             format!("That {} is too long.", if pin { "PIN" } else { "password" })
@@ -802,8 +802,8 @@ mod tests {
         assert_eq!(password_problem("abcd\tefgh"), Some(BadChar));
         assert_eq!(password_problem("abcdefgh\n"), Some(BadChar));
         assert_eq!(password_problem("abcdefgh\u{7f}"), Some(BadChar));
-        assert_eq!(pin_problem("12345"), Some(TooShort));
-        assert_eq!(pin_problem("123456"), None);
+        assert_eq!(pin_problem("123"), Some(TooShort));
+        assert_eq!(pin_problem("1234"), None);
         assert_eq!(pin_problem(&"1".repeat(64)), None);
         assert_eq!(pin_problem(&"1".repeat(65)), Some(TooLong));
         assert_eq!(pin_problem("12345é"), Some(BadChar));
@@ -815,8 +815,8 @@ mod tests {
         assert!(!secret_ok("password", "correct horse", "correct horsf"));
         assert!(!secret_ok("password", "correct horse", ""));
         assert!(!secret_ok("password", "short", "short"));
-        assert!(secret_ok("tpm-pin", "123456", "123456"));
-        assert!(!secret_ok("tpm-pin", "12345", "12345"));
+        assert!(secret_ok("tpm-pin", "1234", "1234"));
+        assert!(!secret_ok("tpm-pin", "123", "123"));
         assert_eq!(secret_hint("password", "", ""), "");
         assert_eq!(
             secret_hint("password", "abc", ""),
@@ -824,7 +824,7 @@ mod tests {
         );
         assert_eq!(
             secret_hint("tpm-pin", "123", ""),
-            "Use at least 6 characters."
+            "Use at least 4 characters."
         );
         assert_eq!(secret_hint("password", "correct horse", ""), "");
         assert_eq!(

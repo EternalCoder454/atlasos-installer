@@ -61,7 +61,7 @@ impl Encryption {
 
 pub const PASSWORD_MIN: usize = 8;
 pub const PASSWORD_MAX: usize = 256;
-pub const PIN_MIN: usize = 6;
+pub const PIN_MIN: usize = 4;
 pub const PIN_MAX: usize = 64;
 
 /// Printable ASCII, space to tilde: what the initramfs console prompt can
@@ -88,7 +88,8 @@ pub fn validate_password(p: &str) -> Result<(), String> {
     validate_typed(p, "disk password", PASSWORD_MIN, PASSWORD_MAX)
 }
 
-/// A TPM PIN: 6 to 64 printable ASCII characters.
+/// A TPM PIN: 4 to 64 printable ASCII characters. Short is enough: the
+/// TPM locks out repeated wrong guesses, and the recovery key is the fallback.
 pub fn validate_pin(p: &str) -> Result<(), String> {
     validate_typed(p, "disk PIN", PIN_MIN, PIN_MAX)
 }
@@ -255,10 +256,10 @@ mod tests {
         ] {
             assert!(validate_password(bad).is_err(), "{bad:?}");
         }
-        assert!(validate_pin("123456").is_ok() && validate_pin(&"7".repeat(64)).is_ok());
+        assert!(validate_pin("1234").is_ok() && validate_pin(&"7".repeat(64)).is_ok());
         for bad in [
             "",
-            "12345",
+            "123",
             &"7".repeat(65),
             "12345é",
             "1234\n56",
