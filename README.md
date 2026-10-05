@@ -32,9 +32,9 @@ The Disk page has an "Encrypt this disk" switch. The disk is encrypted with
 LUKS2. There are three ways to unlock it:
 
 - **TPM** (PCs with a TPM 2.0; on by default). The disk unlocks by itself
-  when the PC starts. The key is bound to the Secure Boot state (PCR 7). This
-  protects your files if the disk is taken out of the PC, or the PC is sold
-  or recycled.
+  when the PC starts. The key is bound to the Secure Boot state (PCR 7) at
+  the first start (see below). This protects your files if the disk is
+  taken out of the PC, or the PC is sold or recycled.
 - **TPM and a PIN** ("Ask for a PIN when this PC starts"). As above, plus a
   PIN (4 to 64 characters) at every start. This also protects your files if
   the whole PC is stolen.
@@ -79,14 +79,20 @@ key, and the NVIDIA modules it signs (checked by the kernel, not by shim)
 don't change PCR 7 either. A boot loader that shim checks with a MOK key is
 different: shim records that key in PCR 7.
 
-That is why the TPM can't be used when the installer is started through
-Ventoy, or from an ISO file through another boot menu: that boot loader is
-recorded in PCR 7 during the install, and the installed system's own boot
-never matches it, so every start would ask for the recovery key. The
-installer then offers a password instead (and the helper refuses the TPM).
-Write the ISO straight to a USB stick to use the TPM. The installer knows a
-Ventoy boot by Ventoy's `/dev/mapper/ventoy` (its normal mode); a Ventoy mode
-that copies the whole ISO into memory instead isn't recognised.
+That is a problem when the installer is started through Ventoy, or from an
+ISO file through another boot menu: that boot loader is recorded in PCR 7
+during the install, and the installed system's own boot never matches it.
+So the installer doesn't seal the key to PCR 7 itself. It leaves a TPM key
+with no PCR policy, and the installed system's first start replaces it with
+one bound to its own PCR 7 (`atlas-tpm-seal.service`, which then stops
+running). Until that first start, the TPM unlocks the disk for any system
+started on the PC; with a PIN, the PIN is still needed. If the seal fails,
+it tries again at every start, and `systemctl status atlas-tpm-seal` says
+why. Someone who unlocked the disk before the seal keeps its key, so keep
+the PC with you until its first start.
+
+The installed system keeps the install log and the live session's TPM event
+log in `/var/log/atlas-installer/`.
 
 ## Requirements
 

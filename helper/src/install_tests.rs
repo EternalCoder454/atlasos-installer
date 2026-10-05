@@ -593,6 +593,12 @@ fn free_space_beside_windows() {
             "efibootmgr",
             "efibootmgr --quiet --bootnext 0006",
             "efibootmgr --quiet --delete-bootnum --bootnum 0005",
+            "setfiles -F -r T/ostree/deploy/default \
+             T/ostree/deploy/default/deploy/abc123.0/etc/selinux/targeted/contexts/files/file_contexts \
+             T/ostree/deploy/default/var \
+             T/ostree/deploy/default/var/log \
+             T/ostree/deploy/default/var/log/atlas-installer \
+             T/ostree/deploy/default/var/log/atlas-installer/install.log",
             "umount --recursive T",
             "umount --recursive /run/bootc/storage",
         ]
@@ -1430,7 +1436,7 @@ fn tpm_encryption_runs_these_commands() {
             "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
             format!("systemd-cryptenroll --unlock-key-file={KEY} --recovery-key /dev/sda6"),
             format!(
-                "systemd-cryptenroll --unlock-key-file={KEY} --tpm2-device=auto --tpm2-pcrs=7 /dev/sda6"
+                "systemd-cryptenroll --unlock-key-file={KEY} --tpm2-device=auto --tpm2-pcrs= /dev/sda6"
             ),
             "cryptsetup open --test-passphrase --token-only --token-type systemd-tpm2 /dev/sda6"
                 .into(),
@@ -2002,6 +2008,47 @@ fn encryption_needs_its_tools_before_anything_is_written() {
 }
 
 #[test]
+fn links_are_placed_atomically_and_never_followed() {
+    let w = World::new();
+    let base = w.env.target.join("etc");
+    fs::create_dir_all(&base).unwrap();
+    let rel = "systemd/system/multi-user.target.wants/x.service";
+    let made = write_link(&base, rel, "../x.service").unwrap();
+    assert_eq!(made.len(), 3, "{made:?}");
+    // again, over itself and over a leftover of a crashed run
+    let dir = base.join("systemd/system/multi-user.target.wants");
+    let victim = w.env.root.join("victim");
+    fs::write(&victim, "keep").unwrap();
+    let tmp = dir.join(format!(".x.service.atlas-tmp-{}", std::process::id()));
+    std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+    assert!(write_link(&base, rel, "../y.service").unwrap().is_empty());
+    assert_eq!(
+        fs::read_link(dir.join("x.service")).unwrap(),
+        Path::new("../y.service")
+    );
+    assert!(!tmp.exists() && fs::symlink_metadata(&tmp).is_err());
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    // a file placed over a link replaces the link, not what it points to
+    std::os::unix::fs::symlink(&victim, dir.join("f")).unwrap();
+    write_file(
+        &base,
+        "systemd/system/multi-user.target.wants/f",
+        "new",
+        0o644,
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    assert!(!fs::symlink_metadata(dir.join("f")).unwrap().is_symlink());
+    // a link where a directory goes is refused
+    let elsewhere = w.env.root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, base.join("lnk")).unwrap();
+    let e = write_link(&base, "lnk/x.service", "../x.service").unwrap_err();
+    assert!(e.contains("is not a directory"), "{e}");
+    assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+}
+
+#[test]
 fn the_temporary_key_never_follows_a_link() {
     let w = World::new();
     fs::create_dir_all(w.env.run_dir.join("luks")).unwrap();
@@ -2055,7 +2102,7 @@ fn tpm_with_a_pin_puts_the_pin_in_the_environment_only() {
             "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
             format!("systemd-cryptenroll --unlock-key-file={KEY} --recovery-key /dev/sda6"),
             format!(
-                "systemd-cryptenroll --unlock-key-file={KEY} --tpm2-device=auto --tpm2-pcrs=7 --tpm2-with-pin=yes /dev/sda6"
+                "systemd-cryptenroll --unlock-key-file={KEY} --tpm2-device=auto --tpm2-pcrs= --tpm2-with-pin=yes /dev/sda6"
             ),
             format!("cryptsetup luksRemoveKey --key-file {KEY} /dev/sda6"),
             format!(
@@ -2647,30 +2694,153 @@ fn a_copy_in_at_the_first_look_still_gets_its_line() {
 }
 
 #[test]
-fn a_boot_through_ventoy_or_an_iso_file_refuses_the_tpm() {
+fn a_boot_through_ventoy_or_an_iso_file_keeps_the_tpm_and_says_so_in_the_log() {
     let ventoy: &[u8] = b"/dev/mapper/ventoy /run/initramfs/live iso9660 ro 0 0\n";
     let iso_file: &[u8] = b"/dev/sdb1 /run/initramfs/isoscan exfat ro 0 0\n\
           /dev/loop0 /run/initramfs/live iso9660 ro 0 0\n";
-    for (mounts, loader, how) in [
-        (ventoy, "ventoy", "through Ventoy"),
-        (iso_file, "iso-file", "from an ISO file"),
-    ] {
+    for (mounts, loader) in [(ventoy, "ventoy"), (iso_file, "iso-file")] {
         let w = World::new().with_tpm();
         w.put("proc/self/mounts", mounts);
         let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
         assert_eq!(v["chain_loaded"], loader);
-        assert_eq!(v["tpm2"], true, "the chip is there all the same");
-        for (enc, secret) in [("tpm", ""), ("tpm-pin", PIN)] {
-            let e = w
-                .install(&enc_req("sda", "free-space", enc, secret))
-                .0
-                .unwrap_err();
-            assert!(e.contains(how) && e.contains("Choose a password"), "{e}");
-            assert!(w.writes().is_empty(), "{:?}", w.writes());
-        }
+        assert_eq!(v["tpm2"], true);
+        // sealed at the first start, so the loader that started the
+        // installer doesn't matter
+        w.install(&enc_req("sda", "free-space", "tpm-pin", PIN))
+            .0
+            .unwrap();
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        assert!(
+            log.contains(&format!(
+                "started by: {loader}, not the ISO's own boot loader"
+            )),
+            "{log}"
+        );
     }
     // the ISO's own boot loader: nothing to say
     let w = World::new().with_tpm();
     let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
     assert_eq!(v["chain_loaded"], serde_json::Value::Null);
+    w.install(&enc_req("sda", "free-space", "tpm", ""))
+        .0
+        .unwrap();
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(!log.contains("started by:"), "{log}");
+}
+
+#[test]
+fn a_tpm_install_seals_to_pcr_7_at_the_first_start() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path| fs::symlink_metadata(p).unwrap().permissions().mode() & 0o7777;
+    for (enc, secret) in [("tpm", ""), ("tpm-pin", PIN)] {
+        let w = World::new().with_tpm();
+        let out = w
+            .install(&enc_req("sda", "free-space", enc, secret))
+            .0
+            .unwrap();
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+        let u = w.luks_uuid();
+        let d = w.deploy();
+        let unit_path = d.join("etc/systemd/system/atlas-tpm-seal.service");
+        let unit = fs::read_to_string(&unit_path).unwrap();
+        let e: Encryption = enc.parse().unwrap();
+        assert_eq!(unit, crypt::seal_unit(e, &u).unwrap());
+        assert!(unit.contains(&format!("/dev/disk/by-uuid/{u}\n")));
+        assert_eq!(mode(&unit_path), 0o644);
+        let link = d.join("etc/systemd/system/multi-user.target.wants/atlas-tpm-seal.service");
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            Path::new("../atlas-tpm-seal.service")
+        );
+        let marker = d.join("etc/atlas-installer/tpm-seal");
+        assert_eq!(
+            fs::read_to_string(&marker).unwrap(),
+            crypt::SEAL_MARKER_TEXT
+        );
+        assert_eq!(mode(&marker), 0o600);
+        assert_eq!(mode(&d.join("etc/atlas-installer")), 0o700);
+        assert_eq!(
+            mode(&d.join("etc")),
+            0o755,
+            "only the last directory is private"
+        );
+        let pin = d.join("etc/atlas-installer/tpm-pin");
+        if enc == "tpm-pin" {
+            assert_eq!(fs::read_to_string(&pin).unwrap(), PIN, "no newline");
+            assert_eq!(mode(&pin), 0o600);
+        } else {
+            assert!(!pin.exists());
+        }
+        // all of it gets its SELinux label
+        let label = lock(&w.fake.calls)
+            .iter()
+            .find(|c| c.name() == "setfiles" && c.args.iter().any(|a| a.ends_with("tpm-seal")))
+            .map(|c| c.args.clone())
+            .expect("labelled");
+        for f in [&unit_path, &link, &d.join("etc/atlas-installer")] {
+            assert!(label.contains(&f.display().to_string()), "{f:?}");
+        }
+        assert_eq!(label.contains(&pin.display().to_string()), enc == "tpm-pin");
+        let log = fs::read_to_string(w.env.log_path()).unwrap();
+        assert!(log.contains("--tpm2-pcrs=7"), "the plan says so: {log}");
+        assert!(!log.contains(PIN));
+    }
+    // no TPM: nothing to seal
+    for (enc, secret) in [("password", PASSWORD), ("none", "")] {
+        let w = World::new().with_tpm();
+        w.install(&enc_req("sda", "free-space", enc, secret))
+            .0
+            .unwrap();
+        assert!(
+            !w.deploy()
+                .join("etc/systemd/system/atlas-tpm-seal.service")
+                .exists()
+        );
+        assert!(!w.deploy().join("etc/atlas-installer").exists());
+    }
+}
+
+#[test]
+fn the_new_system_keeps_the_install_log_and_the_tpm_event_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = World::new().with_tpm();
+    let events = b"\x00\x01\x02 binary event log \xff";
+    w.put("sys/kernel/security/tpm0/binary_bios_measurements", events);
+    w.install(&enc_req("sda", "free-space", "tpm-pin", PIN))
+        .0
+        .unwrap();
+    let dir = w
+        .env
+        .target
+        .join("ostree/deploy/default/var/log/atlas-installer");
+    let kept = fs::read_to_string(dir.join("install.log")).unwrap();
+    assert!(kept.contains("encryption: tpm-pin"), "{kept}");
+    assert!(kept.contains("# this log is kept in the new system"));
+    assert!(!kept.contains(PIN) && !kept.contains(RECOVERY_KEY));
+    assert_eq!(fs::read(dir.join("tpm-event-log.bin")).unwrap(), events);
+    let m = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+    assert_eq!(m, 0o700);
+    let m = fs::metadata(dir.parent().unwrap())
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(m, 0o755, "/var/log itself stays open");
+    for f in ["install.log", "tpm-event-log.bin"] {
+        let m = fs::metadata(dir.join(f)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m, 0o600, "{f}");
+    }
+    // no event log, and a link where the directory goes: the install is
+    // still a success, and nothing is written through the link
+    let w = World::new();
+    let outside = w.env.root.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    let var = w.env.target.join("ostree/deploy/default/var");
+    fs::create_dir_all(&var).unwrap();
+    std::os::unix::fs::symlink(&outside, var.join("log")).unwrap();
+    let out = w.install(&req("sda", "free-space")).0.unwrap();
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(log.contains("# not kept in the new system"), "{log}");
 }

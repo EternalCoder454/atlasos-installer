@@ -208,11 +208,132 @@ pub fn check_slots(json: &str, enc: Encryption) -> Result<(), String> {
     Ok(())
 }
 
+/// The service that ties the TPM unlock to Secure Boot on the installed
+/// system's first start. The installer enrols the TPM with no PCRs, because
+/// the live system's PCR 7 is not always the installed system's: Ventoy, or
+/// a boot menu starting the ISO as a file, puts its own boot loader's key
+/// in it. At the first start PCR 7 is the system's own, and the service
+/// seals the key to it, then stops running.
+pub const SEAL_UNIT: &str = "atlas-tpm-seal.service";
+/// While this file exists, the service runs at every start; it is removed
+/// once the seal worked. Writing it again (and the PIN, with a PIN) seals
+/// the disk anew to the current PCR 7.
+pub const SEAL_MARKER: &str = "/etc/atlas-installer/tpm-seal";
+pub const SEAL_MARKER_TEXT: &str = "# While this file exists, atlas-tpm-seal.service ties the disk's TPM unlock\n# to this PC's Secure Boot state (PCR 7) at each start. It removes this file\n# once that worked.\n";
+/// The PIN (no newline), for unlocking with the current TPM key and for the
+/// new one: 0600, on the encrypted root. Removed with the marker.
+pub const SEAL_PIN: &str = "/etc/atlas-installer/tpm-pin";
+
+/// The unit file of [`SEAL_UNIT`] for the LUKS volume `uuid`.
+///
+/// The enrolment unlocks with the current TPM key (and the PIN), adds the
+/// one bound to PCR 7, then wipes every other TPM key: a failure at any
+/// point leaves at least one TPM key and the recovery key. It doesn't hold
+/// up the start (no ordering against the boot targets), and it never asks
+/// for anything: the PIN comes as a credential, and a prompt would time out.
+pub fn seal_unit(enc: Encryption, uuid: &str) -> Result<String, String> {
+    settings::validate_uuid(uuid)?;
+    let pin = match enc {
+        Encryption::Tpm => false,
+        Encryption::TpmPin => true,
+        _ => return Err("only a TPM unlock is sealed at the first start".into()),
+    };
+    let mut s = format!(
+        "# Written by the AtlasOS installer: ties the disk's TPM unlock to this\n\
+         # PC's Secure Boot state (PCR 7) at the first start. See {SEAL_MARKER}.\n\
+         [Unit]\n\
+         Description=Tie the disk's TPM unlock to Secure Boot\n\
+         DefaultDependencies=no\n\
+         ConditionPathExists={SEAL_MARKER}\n\
+         Wants=tpm2.target\n\
+         After=local-fs.target systemd-tmpfiles-setup.service tpm2.target\n\
+         Before=shutdown.target\n\
+         Conflicts=shutdown.target\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         ExecStart=/usr/bin/systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7{} --wipe-slot=tpm2 /dev/disk/by-uuid/{uuid}\n\
+         ExecStartPost=/usr/bin/rm -f {SEAL_PIN} {SEAL_MARKER}\n",
+        if pin { " --tpm2-with-pin=yes" } else { "" },
+    );
+    if pin {
+        s.push_str(&format!(
+            "LoadCredential=cryptenroll.tpm2-pin:{SEAL_PIN}\n\
+             LoadCredential=cryptenroll.new-tpm2-pin:{SEAL_PIN}\n"
+        ));
+    }
+    s.push_str(
+        "TimeoutStartSec=2min\n\
+         UMask=0077\n\
+         ProtectSystem=strict\n\
+         ReadWritePaths=/etc/atlas-installer -/run/cryptsetup\n\
+         PrivateTmp=yes\n\
+         PrivateNetwork=yes\n\
+         ProtectHome=yes\n\
+         ProtectProc=invisible\n\
+         ProtectKernelTunables=yes\n\
+         ProtectKernelModules=yes\n\
+         ProtectKernelLogs=yes\n\
+         ProtectControlGroups=yes\n\
+         ProtectClock=yes\n\
+         ProtectHostname=yes\n\
+         CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_IPC_LOCK\n\
+         NoNewPrivileges=yes\n\
+         RestrictAddressFamilies=AF_UNIX AF_ALG\n\
+         RestrictNamespaces=yes\n\
+         RestrictRealtime=yes\n\
+         RestrictSUIDSGID=yes\n\
+         LockPersonality=yes\n\
+         MemoryDenyWriteExecute=yes\n\
+         SystemCallArchitectures=native\n\
+         SystemCallFilter=@system-service\n\
+         \n\
+         [Install]\n\
+         WantedBy=multi-user.target\n",
+    );
+    Ok(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const UUID: &str = "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f";
+
+    #[test]
+    fn the_first_start_seal_unit_binds_pcr_7_and_never_asks() {
+        let tpm = seal_unit(Encryption::Tpm, UUID).unwrap();
+        let exec = format!(
+            "ExecStart=/usr/bin/systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2 /dev/disk/by-uuid/{UUID}\n"
+        );
+        assert!(tpm.contains(&exec), "{tpm}");
+        assert!(tpm.contains("ConditionPathExists=/etc/atlas-installer/tpm-seal\n"));
+        assert!(
+            tpm.contains("ExecStartPost=/usr/bin/rm -f /etc/atlas-installer/tpm-pin /etc/atlas-installer/tpm-seal\n")
+        );
+        assert!(tpm.contains("DefaultDependencies=no\n"));
+        assert!(tpm.contains("WantedBy=multi-user.target\n"));
+        assert!(!tpm.contains("LoadCredential"));
+        assert!(!tpm.contains("with-pin"));
+
+        let pin = seal_unit(Encryption::TpmPin, UUID).unwrap();
+        assert!(pin.contains("--tpm2-pcrs=7 --tpm2-with-pin=yes --wipe-slot=tpm2 "));
+        assert!(pin.contains("LoadCredential=cryptenroll.tpm2-pin:/etc/atlas-installer/tpm-pin\n"));
+        assert!(
+            pin.contains("LoadCredential=cryptenroll.new-tpm2-pin:/etc/atlas-installer/tpm-pin\n")
+        );
+
+        assert!(seal_unit(Encryption::Password, UUID).is_err());
+        assert!(seal_unit(Encryption::None, UUID).is_err());
+        assert!(seal_unit(Encryption::Tpm, "x\nExecStart=/bin/sh").is_err());
+        // every line is a section, a comment, empty, or a key=value
+        for l in pin.lines() {
+            assert!(
+                l.is_empty() || l.starts_with('#') || l.starts_with('[') || l.contains('='),
+                "{l}"
+            );
+        }
+    }
     const KEY: &str = "ulcbjnni-ehtlcfnl-ntenkltt-vjuiicdf-hvdkerji-fjkurjhr-lckjntdb-kvkeeide";
 
     #[test]

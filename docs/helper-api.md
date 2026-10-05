@@ -35,9 +35,9 @@ was started from a Ventoy stick, `"iso-file"` when it was started from an
 ISO file through another boot loader's menu (mounted at
 `/run/initramfs/isoscan`), and `null` when the ISO's own boot loader started
 it. That other loader is measured into PCR 7 and the installed system's
-boot isn't, so a key sealed to PCR 7 now would never unseal: Install
-refuses `tpm` and `tpm-pin` while `chain_loaded` is set. Each disk has these
-fields:
+boot isn't, which is why the TPM is sealed to PCR 7 only at the installed
+system's first start (see Disk encryption). It goes into the install log.
+Each disk has these fields:
 
 | Field | Meaning |
 |---|---|
@@ -83,7 +83,7 @@ refused.
 | `locale` | For example `de_DE.UTF-8`. |
 | `keymap` | `de`, or `de(nodeadkeys)` with a variant. |
 | `wifi_uuid` | A NetworkManager connection to copy into the new system, or an empty string. |
-| `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false, or set `chain_loaded`. |
+| `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false. |
 | `password` | For `password`: the disk password, 8 to 256 characters. For `tpm-pin`: the PIN, 4 to 64 characters. Printable ASCII only (space to `~`): the initramfs prompt can't reliably type anything else (keymaps, dead keys, normalisation). An empty string for `none` and `tpm`; anything else is refused. |
 
 Install probes the disks again and decides everything before it writes
@@ -244,7 +244,8 @@ for the root partition `<node>`, with a random UUID `<uuid>` and a random
 4. `systemd-cryptenroll --unlock-key-file=<key> --recovery-key <node>`: the
    recovery key is read from its stdout, and refused unless it has the
    format above
-5. `tpm`: `systemd-cryptenroll --unlock-key-file=<key> --tpm2-device=auto --tpm2-pcrs=7 <node>`,
+5. `tpm`: `systemd-cryptenroll --unlock-key-file=<key> --tpm2-device=auto --tpm2-pcrs= <node>`
+   (no PCRs yet: see "Sealed at the first start" below),
    then `cryptsetup open --test-passphrase --token-only --token-type systemd-tpm2 <node>`
    proves the TPM unlocks it. If either fails, Install stops: "This PC's
    security chip (TPM) didn't accept the disk key. Go back and turn
@@ -264,6 +265,43 @@ for the root partition `<node>`, with a random UUID `<uuid>` and a random
    `cryptsetup open --test-passphrase --disable-external-tokens --key-file ...`:
    cryptsetup tries the TPM token before the key it is given, so without that
    flag every key would seem to work.
+
+**Sealed at the first start.** The live system's PCR 7 is not always the
+installed system's: started through Ventoy, or as an ISO file from another
+boot menu, shim records that boot loader's key in PCR 7, and the installed
+system's own boot never does. So the TPM key made at the install has no PCR
+policy, and the installed system ties it to its own PCR 7 when it first
+starts. In the Settings stage, for `tpm` and `tpm-pin`, the helper writes
+into the deployment's `/etc` (labelled like the settings files):
+
+- `/etc/systemd/system/atlas-tpm-seal.service` (0644), enabled by the link
+  `multi-user.target.wants/atlas-tpm-seal.service` → `../atlas-tpm-seal.service`
+- `/etc/atlas-installer/` (0700) `tpm-seal` (0600): the service runs at
+  each start while this file exists
+- `tpm-pin` only: `/etc/atlas-installer/tpm-pin` (0600, the PIN with no
+  newline), on the encrypted root
+
+The service runs `systemd-cryptenroll --unlock-tpm2-device=auto
+--tpm2-device=auto --tpm2-pcrs=7 [--tpm2-with-pin=yes] --wipe-slot=tpm2
+/dev/disk/by-uuid/<uuid>`, with the PIN as the credentials
+`cryptenroll.tpm2-pin` and `cryptenroll.new-tpm2-pin` (`LoadCredential=`
+from the PIN file, never in the environment or the arguments). It unlocks
+with the current TPM key, adds one bound to PCR 7, and only then wipes the
+other TPM keys, so a failure at any point leaves a TPM key and the recovery
+key. When it succeeds it removes the PIN file and `tpm-seal`; when it fails
+(the journal has the tool's words) both stay and it tries again at the next
+start. It never prompts (a missing PIN fails it at once) and it isn't
+ordered against the boot targets, so it doesn't hold up the login screen. It
+is sandboxed (`ProtectSystem=strict` with only `/etc/atlas-installer`
+writable, no network, a system-call filter, and no capability beyond
+`CAP_DAC_OVERRIDE` and `CAP_IPC_LOCK`). Writing `tpm-seal` again (and the
+PIN, with a PIN) seals the disk anew to the current PCR 7.
+
+Until a seal has worked, the TPM unlocks the disk for any system started on
+this PC (the PIN is still needed with `tpm-pin`). That lasts as long as the
+seal keeps failing (the journal says why), and the PIN stays in
+`/etc/atlas-installer` meanwhile. Someone who unlocked the disk in that time
+has its volume key, which sealing afterwards doesn't change.
 
 A failing step stops the install with "Setting up encryption failed while
 <step>. The install log has the details: <log path>"; the tools' own
@@ -374,7 +412,12 @@ writes one out.
 8. Unmount.
 
 Every command and its output, except secrets, go to
-`/run/atlas-installer/install.log` (mode 0600).
+`/run/atlas-installer/install.log` (mode 0600). Before unmounting, the
+helper keeps a copy of it, and of the firmware's TPM event log
+(`/sys/kernel/security/tpm0/binary_bios_measurements`, when there is one),
+in the new system as `/var/log/atlas-installer/install.log` and
+`tpm-event-log.bin` (mode 0600, in a 0700 directory). They hold this PC's
+disk layout and labels, no secrets. A failure there only goes into the log.
 
 ## Command line (root only, for testing)
 

@@ -40,6 +40,11 @@ const MINUTE: std::time::Duration = std::time::Duration::from_secs(60);
 /// with its spec version) and the resource-managed device systemd uses.
 const TPM_CLASS: &str = "sys/class/tpm";
 const TPM_DEVICE: &str = "dev/tpmrm0";
+/// The firmware's TPM event log: what went into each PCR during this boot.
+const TPM_EVENT_LOG: &str = "sys/kernel/security/tpm0/binary_bios_measurements";
+/// Where the new system keeps the install log and the TPM event log (the
+/// live system's copies are gone at the restart).
+const SAVED_LOGS: &str = "var/log/atlas-installer";
 /// The disk's temporary key lives in this directory of the run dir (0700).
 const KEY_DIR: &str = "luks";
 const KEY_FILE: &str = "luks-key";
@@ -383,6 +388,9 @@ pub struct Prepared {
     pub kargs: Vec<String>,
     /// See [`Outcome::boot_media`].
     pub boot_media: &'static str,
+    /// See [`Listing::chain_loaded`]; for the log only, since the TPM is
+    /// sealed to PCR 7 at the installed system's first start.
+    pub chain_loaded: Option<&'static str>,
     /// The disk's fingerprint as `prepare` saw it; checked again just before
     /// the first write.
     pub fingerprint: String,
@@ -441,18 +449,6 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
             "This PC has no usable security chip (TPM 2.0), so the disk can't be unlocked by it. Choose a password instead, or turn encryption off."
                 .into(),
         );
-    }
-    if req.encryption.uses_tpm()
-        && let Some(loader) = chain_loaded(env, &probe)
-    {
-        let how = if loader == "ventoy" {
-            "through Ventoy"
-        } else {
-            "from an ISO file, through another boot menu"
-        };
-        return Err(format!(
-            "The installer was started {how}, so the disk can't be tied to this PC's security chip: it would ask for the recovery key at every start. Choose a password instead, or start the installer from a USB stick the AtlasOS ISO was written to."
-        ));
     }
 
     if req.encryption != Encryption::None {
@@ -522,6 +518,7 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
         mok,
         wifi,
         boot_media: disks::boot_media(&probe),
+        chain_loaded: chain_loaded(env, &probe),
         fingerprint,
     })
 }
@@ -1006,7 +1003,10 @@ fn format_encrypted_root(
 
     match req.encryption {
         Encryption::Tpm | Encryption::TpmPin => {
-            let mut enroll = vec![unlock.as_str(), "--tpm2-device=auto", "--tpm2-pcrs=7"];
+            // No PCRs yet: the live system's PCR 7 may hold another boot
+            // loader's key. The installed system seals to its own PCR 7 at
+            // its first start (crypt::seal_unit).
+            let mut enroll = vec![unlock.as_str(), "--tpm2-device=auto", "--tpm2-pcrs="];
             let pin = req.encryption == Encryption::TpmPin;
             if pin {
                 enroll.push("--tpm2-with-pin=yes");
@@ -1132,10 +1132,10 @@ pub fn describe(p: &Prepared, req: &Request, env: &Env) -> String {
             "systemd-cryptenroll --unlock-key-file=<temporary key> --recovery-key (key is shown after the install)".into(),
             match req.encryption {
                 Encryption::Tpm => format!(
-                    "systemd-cryptenroll --unlock-key-file=<temporary key> --tpm2-device=auto --tpm2-pcrs=7 {node}, then cryptsetup open --test-passphrase --token-only --token-type systemd-tpm2 {node}"
+                    "systemd-cryptenroll --unlock-key-file=<temporary key> --tpm2-device=auto --tpm2-pcrs= {node}, then cryptsetup open --test-passphrase --token-only --token-type systemd-tpm2 {node}"
                 ),
                 Encryption::TpmPin => format!(
-                    "systemd-cryptenroll --unlock-key-file=<temporary key> --tpm2-device=auto --tpm2-pcrs=7 --tpm2-with-pin=yes {node} (PIN in $NEWPIN)"
+                    "systemd-cryptenroll --unlock-key-file=<temporary key> --tpm2-device=auto --tpm2-pcrs= --tpm2-with-pin=yes {node} (PIN in $NEWPIN)"
                 ),
                 _ => format!(
                     "cryptsetup luksAddKey --key-file <temporary key> --new-keyfile - {node} (password on stdin)"
@@ -1147,6 +1147,23 @@ pub fn describe(p: &Prepared, req: &Request, env: &Env) -> String {
         for step in steps {
             s.push_str(&format!("  {step}\n"));
         }
+        if req.encryption.uses_tpm() {
+            s.push_str(&format!(
+                "  /etc/systemd/system/{}: at the first start, systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7{} --wipe-slot=tpm2 /dev/disk/by-uuid/{uuid} (while {} exists)\n",
+                crypt::SEAL_UNIT,
+                if req.encryption == Encryption::TpmPin {
+                    format!(" --tpm2-with-pin=yes (PIN in {})", crypt::SEAL_PIN)
+                } else {
+                    String::new()
+                },
+                crypt::SEAL_MARKER,
+            ));
+        }
+    }
+    if let Some(loader) = p.chain_loaded {
+        s.push_str(&format!(
+            "started by: {loader}, not the ISO's own boot loader\n"
+        ));
     }
     s.push_str(&format!(
         "settings: LANG={}, keyboard {} (console {}), Wi-Fi {}\n",
@@ -1177,6 +1194,9 @@ pub fn describe(p: &Prepared, req: &Request, env: &Env) -> String {
     s.push_str(&format!(
         "NVIDIA key for MOK enrollment: {}\n",
         if p.mok { "queued" } else { "no" }
+    ));
+    s.push_str(&format!(
+        "logs kept in the new system: /{SAVED_LOGS}/install.log, /{SAVED_LOGS}/tpm-event-log.bin\n"
     ));
     s
 }
@@ -1543,7 +1563,28 @@ fn on_cable(env: &Env, log: &Log) -> bool {
 /// never followed, and replaces the file atomically (temporary name, then
 /// rename). Returns the directories it had to create, which need labels too.
 fn write_file(base: &Path, rel: &str, contents: &str, mode: u32) -> Result<Vec<PathBuf>, String> {
-    use rustix::fs::{AtFlags, Mode, OFlags, openat, renameat, unlinkat};
+    place(base, rel, Entry::File(contents.as_bytes(), mode), false)
+}
+
+/// [`write_file`] for root's eyes only: the file is 0600, and its own
+/// directory, if it has to be made, 0700.
+fn write_private(base: &Path, rel: &str, contents: &[u8]) -> Result<Vec<PathBuf>, String> {
+    place(base, rel, Entry::File(contents, 0o600), true)
+}
+
+/// A symbolic link `base/rel` to `target`, placed like [`write_file`]
+/// places a file.
+fn write_link(base: &Path, rel: &str, target: &str) -> Result<Vec<PathBuf>, String> {
+    place(base, rel, Entry::Link(target), false)
+}
+
+enum Entry<'a> {
+    File(&'a [u8], u32),
+    Link(&'a str),
+}
+
+fn place(base: &Path, rel: &str, entry: Entry, private: bool) -> Result<Vec<PathBuf>, String> {
+    use rustix::fs::{AtFlags, Mode, OFlags, openat, renameat, symlinkat, unlinkat};
     use rustix::io::Errno;
     let path = base.join(rel);
     let fail = |e: Errno| format!("cannot write {}: {e}", path.display());
@@ -1577,7 +1618,12 @@ fn write_file(base: &Path, rel: &str, contents: &str, mode: u32) -> Result<Vec<P
             fail(e)
         }
     })?;
-    for part in dirs {
+    for (i, part) in dirs.iter().enumerate() {
+        let dir_mode = if private && i + 1 == dirs.len() {
+            0o700
+        } else {
+            0o755
+        };
         if part.is_empty() || *part == "." || *part == ".." {
             return Err(format!("bad path {rel}"));
         }
@@ -1590,7 +1636,7 @@ fn write_file(base: &Path, rel: &str, contents: &str, mode: u32) -> Result<Vec<P
             // a link, or a file, where a directory should be
             Err(Errno::LOOP | Errno::NOTDIR) => return Err(not_dir(&dir)),
             Err(Errno::NOENT) => {
-                match rustix::fs::mkdirat(&fd, *part, Mode::from_raw_mode(0o755)) {
+                match rustix::fs::mkdirat(&fd, *part, Mode::from_raw_mode(dir_mode)) {
                     Ok(()) => created.push(dir.clone()),
                     // made by someone else in between: use it if it is a directory
                     Err(Errno::EXIST) => {}
@@ -1610,32 +1656,48 @@ fn write_file(base: &Path, rel: &str, contents: &str, mode: u32) -> Result<Vec<P
     // A temporary name beside the file, created new (never an existing
     // file or link), then renamed over the final name.
     let tmp = format!(".{name}.atlas-tmp-{}", std::process::id());
-    let file_mode = Mode::from_raw_mode(mode & 0o7777);
-    let create_tmp = || {
-        openat(
-            &fd,
-            tmp.as_str(),
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            file_mode,
-        )
-    };
-    let tmp_fd = match create_tmp() {
-        // a leftover of a crashed run: remove it (a link is unlinked, not
-        // followed) and try once more
-        Err(Errno::EXIST) => {
-            unlinkat(&fd, tmp.as_str(), AtFlags::empty()).map_err(fail)?;
-            create_tmp()
+    // a leftover of a crashed run is removed (a link is unlinked, not
+    // followed) before one more try
+    fn once_more<T>(
+        make: impl Fn() -> Result<T, Errno>,
+        clear: impl Fn() -> Result<(), Errno>,
+    ) -> Result<T, Errno> {
+        match make() {
+            Err(Errno::EXIST) => {
+                clear()?;
+                make()
+            }
+            r => r,
         }
-        r => r,
     }
-    .map_err(fail)?;
+    let clear = || unlinkat(&fd, tmp.as_str(), AtFlags::empty());
     let written = (|| -> Result<(), String> {
-        let mut f = fs::File::from(tmp_fd);
-        f.write_all(contents.as_bytes())
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-        rustix::fs::fchmod(&f, file_mode).map_err(fail)?;
-        f.sync_all()
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        match entry {
+            Entry::File(contents, mode) => {
+                let file_mode = Mode::from_raw_mode(mode & 0o7777);
+                let create_tmp = || {
+                    openat(
+                        &fd,
+                        tmp.as_str(),
+                        OFlags::WRONLY
+                            | OFlags::CREATE
+                            | OFlags::EXCL
+                            | OFlags::NOFOLLOW
+                            | OFlags::CLOEXEC,
+                        file_mode,
+                    )
+                };
+                let mut f = fs::File::from(once_more(create_tmp, clear).map_err(fail)?);
+                f.write_all(contents)
+                    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+                rustix::fs::fchmod(&f, file_mode).map_err(fail)?;
+                f.sync_all()
+                    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+            }
+            Entry::Link(target) => {
+                once_more(|| symlinkat(target, &fd, tmp.as_str()), clear).map_err(fail)?;
+            }
+        }
         renameat(&fd, tmp.as_str(), &fd, *name).map_err(fail)?;
         // the rename itself must reach the disk
         rustix::fs::fsync(&fd).map_err(fail)
@@ -1665,6 +1727,49 @@ fn find_deployment(target: &Path) -> Result<PathBuf, String> {
     match found.len() {
         1 => Ok(found.remove(0)),
         n => Err(format!("expected one deployment after bootc, found {n}")),
+    }
+}
+
+/// An absolute path in the new system as a path below its root.
+fn unrooted(path: &str) -> &str {
+    path.trim_start_matches('/')
+}
+
+/// Keep the install log so far and the TPM's event log in the new system's
+/// /var (the deployment's stateroot holds it), for when a problem has to be
+/// explained after the restart. Neither holds a secret: secret commands'
+/// output never reaches the log. Best effort: the install is done.
+fn save_logs(r: &dyn Runner, env: &Env, log: &Log, deploy: &Path) {
+    let Some(stateroot) = deploy.parent().and_then(Path::parent) else {
+        return;
+    };
+    let mut written = Vec::new();
+    let mut save = |name: &str, data: &[u8]| {
+        let rel = format!("{SAVED_LOGS}/{name}");
+        match write_private(stateroot, &rel, data) {
+            Ok(made) => {
+                written.extend(made);
+                written.push(stateroot.join(rel));
+            }
+            Err(e) => log.note(&format!("# not kept in the new system: {e}")),
+        }
+    };
+    match fs::read(env.host(TPM_EVENT_LOG)) {
+        Ok(data) => save("tpm-event-log.bin", &data),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => log.note(&format!("# no TPM event log: {e}")),
+    }
+    log.note(&format!(
+        "# this log is kept in the new system as /{SAVED_LOGS}/install.log"
+    ));
+    match fs::read(env.log_path()) {
+        Ok(data) => save("install.log", &data),
+        Err(e) => log.note(&format!("# the install log can't be read: {e}")),
+    }
+    if let Err(e) = relabel(r, deploy, stateroot, &written) {
+        log.note(&format!(
+            "# the kept logs may have the wrong SELinux label: {e}"
+        ));
     }
 }
 
@@ -2153,9 +2258,45 @@ fn execute(
             0o600,
         ));
     }
+    let seal = match (req.encryption.uses_tpm(), p.luks_uuid.as_deref()) {
+        (false, _) => None,
+        (true, Some(uuid)) => Some(uuid),
+        // a TPM key with no PCR policy and nothing to seal it: never ship that
+        (true, None) => return Err("the encrypted disk has no UUID to seal the TPM key to".into()),
+    };
+    if let Some(uuid) = seal {
+        files.push((
+            format!("etc/systemd/system/{}", crypt::SEAL_UNIT),
+            crypt::seal_unit(req.encryption, uuid)?,
+            0o644,
+        ));
+    }
     let mut written = Vec::new();
     for (rel, contents, mode) in &files {
         written.extend(write_file(&deploy, rel, contents, *mode)?);
+        written.push(deploy.join(rel));
+    }
+    if seal.is_some() {
+        // /etc/atlas-installer is 0700: the PIN is in it
+        let mut private = vec![(crypt::SEAL_MARKER, crypt::SEAL_MARKER_TEXT)];
+        if req.encryption == Encryption::TpmPin {
+            private.push((crypt::SEAL_PIN, req.password.as_str()));
+        }
+        for (path, contents) in private {
+            let rel = unrooted(path);
+            written.extend(write_private(&deploy, rel, contents.as_bytes())?);
+            written.push(deploy.join(rel));
+        }
+        // enabled the way systemctl enable would
+        let rel = format!(
+            "etc/systemd/system/multi-user.target.wants/{}",
+            crypt::SEAL_UNIT
+        );
+        written.extend(write_link(
+            &deploy,
+            &rel,
+            &format!("../{}", crypt::SEAL_UNIT),
+        )?);
         written.push(deploy.join(rel));
     }
     // A missing label doesn't stop the system from booting; say so and go on.
@@ -2212,6 +2353,7 @@ fn execute(
             )),
         }
     }
+    save_logs(r, env, log, &deploy);
     // Installed by now: a failure here is not a failed install.
     let mut devices: Vec<String> = plan.parts.iter().map(|x| x.node.clone()).collect();
     devices.extend(mapper.iter().map(|m| format!("/dev/mapper/{m}")));
