@@ -15,6 +15,7 @@ pub enum Stage {
     Partition,
     Format,
     Copy,
+    Deploy,
     Bootloader,
     Settings,
     Finish,
@@ -28,6 +29,7 @@ impl Stage {
             Stage::Partition => "partition",
             Stage::Format => "format",
             Stage::Copy => "copy",
+            Stage::Deploy => "deploy",
             Stage::Bootloader => "bootloader",
             Stage::Settings => "settings",
             Stage::Finish => "finish",
@@ -40,6 +42,7 @@ impl Stage {
             Stage::Partition => "Creating partitions",
             Stage::Format => "Formatting",
             Stage::Copy => "Copying AtlasOS",
+            Stage::Deploy => "Setting up AtlasOS",
             Stage::Bootloader => "Installing the bootloader",
             Stage::Settings => "Applying your settings",
             Stage::Finish => "Finishing up",
@@ -52,7 +55,8 @@ impl Stage {
             Stage::Prepare => (0.00, 0.02),
             Stage::Partition => (0.02, 0.04),
             Stage::Format => (0.04, 0.07),
-            Stage::Copy => (0.07, 0.85),
+            Stage::Copy => (0.07, 0.77),
+            Stage::Deploy => (0.77, 0.85),
             Stage::Bootloader => (0.85, 0.93),
             Stage::Settings => (0.93, 0.97),
             Stage::Finish => (0.97, 1.00),
@@ -95,8 +99,8 @@ pub struct BootcProgress {
     layers: Option<(u64, u64)>,
     /// Counts arrived: they move the bar, not the time.
     measured: bool,
-    /// When everything was counted in: bootc is merging and deploying the
-    /// layers, and says nothing until it is done.
+    /// When everything was counted in (or bootc moved on): bootc is merging
+    /// and deploying the layers, and says nothing until it is done.
     copied: Option<Duration>,
     /// The import's share, and since when it has stood there.
     still: Option<(f64, Duration)>,
@@ -107,9 +111,12 @@ pub struct BootcProgress {
 }
 
 /// Where the layer import runs within the copy stage: from the "layers
-/// needed" line to the deploy after it.
+/// needed" line to its end. The deploy after it is a stage of its own.
 const IMPORT_FROM: f64 = 0.06;
-const IMPORT_TO: f64 = 0.90;
+const IMPORT_TO: f64 = 1.0;
+/// Without counts, the import eases toward here: the end is for the counts
+/// (or bootc's deploy line) to say.
+const EASE_TO: f64 = 0.9;
 
 /// Seconds of import per GB (of bootc's "layers needed" figure), for the bar
 /// while no byte count is available. A guess: 24 in a VM reading from a CD,
@@ -130,8 +137,9 @@ const STILL: Duration = Duration::from_secs(30);
 /// Without a layer count, "the very end".
 const NEARLY: f64 = 0.95;
 
-/// After the last layer, bootc merges and deploys them before its next line:
-/// the bar eases over about this long (about 150 s in the VM).
+/// After the last layer, bootc merges and deploys them before its next line
+/// ("Deploying container image...done", printed at the end): the bar eases
+/// over about this long (2 and 3 minutes in the VMs).
 const DEPLOY_SECS: f64 = 120.0;
 
 /// While bootc runs, progress goes out at least this often, even unchanged,
@@ -156,6 +164,11 @@ impl Default for BootcProgress {
 impl BootcProgress {
     pub fn current(&self) -> &Progress {
         &self.last
+    }
+
+    /// The layers are all in, by the counts or by bootc's deploy line.
+    pub fn copied(&self) -> bool {
+        self.copied.is_some() || self.imported
     }
 
     fn advance(&mut self, p: Progress, now: Duration) -> Option<Progress> {
@@ -187,7 +200,7 @@ impl BootcProgress {
             Progress::at(Stage::Copy, IMPORT_FROM)
         } else if l.starts_with("Deploying container image") {
             self.imported = true;
-            Progress::at(Stage::Copy, if l.contains("done") { 1.0 } else { 0.92 })
+            Progress::at(Stage::Deploy, if l.contains("done") { 1.0 } else { 0.5 })
         } else if l.starts_with("Bootloader:") || l.starts_with("Installing bootloader") {
             self.imported = true;
             Progress::at(Stage::Bootloader, 0.1)
@@ -262,35 +275,36 @@ impl BootcProgress {
             Some((d, n)) => d >= n || (quiet && all_bytes && d + 1 >= n),
             None => all_bytes || (quiet && share >= NEARLY),
         };
-        let within = if all_in {
+        if all_in {
             self.copied = Some(now);
-            IMPORT_TO
-        } else {
-            IMPORT_FROM + (IMPORT_TO - IMPORT_FROM) * share
-        };
+            return self.advance(Progress::at(Stage::Deploy, 0.0), now);
+        }
+        let within = IMPORT_FROM + (IMPORT_TO - IMPORT_FROM) * share;
         self.advance(Progress::at(Stage::Copy, within), now)
     }
 
-    /// Time passes: without counts the import eases toward 90 % of the
+    /// Time passes: without counts the import eases toward the end of the
     /// stage, and once all is counted, the deploy toward its end. Unchanged
     /// progress is sent again every [`HEARTBEAT`].
     pub fn tick(&mut self, now: Duration) -> Option<Progress> {
         // 1 - e^-t: 63 % of the way at the expected time, never arriving
         let ease = |since: Duration, expect: f64| 1.0 - (-since.as_secs_f64() / expect).exp();
-        let within = match (self.import, self.copied) {
+        let next = match (self.import, self.copied) {
             _ if self.imported => None,
-            (_, Some(at)) => {
-                Some(IMPORT_TO + (0.99 - IMPORT_TO) * ease(now.saturating_sub(at), DEPLOY_SECS))
-            }
-            (Some((start, expect)), None) if !self.measured => Some(
+            (_, Some(at)) => Some(Progress::at(
+                Stage::Deploy,
+                0.99 * ease(now.saturating_sub(at), DEPLOY_SECS),
+            )),
+            (Some((start, expect)), None) if !self.measured => Some(Progress::at(
+                Stage::Copy,
                 IMPORT_FROM
-                    + (IMPORT_TO - IMPORT_FROM)
+                    + (EASE_TO - IMPORT_FROM)
                         * ease(now.saturating_sub(start), expect.as_secs_f64()),
-            ),
+            )),
             _ => None,
         };
-        if let Some(within) = within
-            && let Some(p) = self.advance(Progress::at(Stage::Copy, within), now)
+        if let Some(next) = next
+            && let Some(p) = self.advance(next, now)
         {
             return Some(p);
         }
@@ -303,9 +317,16 @@ impl BootcProgress {
 }
 
 /// How long the install takes after the last layer: bootc merges and deploys
-/// the layers and installs the bootloader, then come the settings and the
-/// final relabel. About 170 s in the VM, with a 7.1 GB image.
-const AFTER_IMPORT_SECS: f64 = 170.0;
+/// the layers, silently, then installs the bootloader, and the settings and
+/// the final relabel follow. It grows with the import, which is slow where
+/// the disks are: 170 s after an 1080 s import in one VM, 125 s after a
+/// 546 s one in another (69 s of merge, 52 of deploy, 4 for the rest).
+const AFTER_BASE_SECS: f64 = 80.0;
+const AFTER_PER_IMPORT: f64 = 0.085;
+/// Without a timed import (the UI started following after it).
+const AFTER_SECS: f64 = 125.0;
+/// From bootc's "Deploying container image...done" to the end.
+const POST_SECS: f64 = 10.0;
 /// The copy speed is a moving average over about this long. The copy runs
 /// in bursts (from 1 to 24 MB/s, half a minute at a time, in the VM), which
 /// a shorter average turns into estimates from 7 minutes to 2 hours.
@@ -330,19 +351,27 @@ enum Estimate {
 }
 
 /// "03:06 left", from the copy's measured speed: what is left of the import
-/// at the average speed of the last few minutes, plus the fixed time after
-/// it. It counts down a second a second between estimates, and moves
-/// toward a new one over [`SMOOTH_SECS`]. Fed the Progress fraction, and
-/// ticked for the clock, with the time since the UI started following.
+/// at the average speed of the last few minutes, plus the time after it
+/// (see [`after_import`]), counted again from the last layer and from the
+/// end of the deploy. It counts down a second a second between estimates,
+/// and moves toward a new one over [`SMOOTH_SECS`]. Fed the Progress
+/// fraction, and ticked for the clock, with the time since the UI started
+/// following.
 #[derive(Debug, Clone, Default)]
 pub struct TimeLeft {
     /// The last sample in the import: fraction and time.
     last: Option<(f64, Duration)>,
     /// The first sample in the import: fraction and time.
     began: Option<(f64, Duration)>,
-    ended: Option<Duration>,
+    /// When the deploy began (the import ended), in seconds on the caller's
+    /// clock (before it began, for a UI that followed late), and when it
+    /// ended.
+    ended: Option<f64>,
+    deployed: Option<Duration>,
     /// Smoothed fraction per second during the import.
     rate: Option<f64>,
+    /// How long the whole import takes, as last projected, in seconds.
+    import: Option<f64>,
     /// When the install should be done (seconds on the caller's clock), as
     /// shown: following the estimate, smoothed.
     finish: Option<f64>,
@@ -403,45 +432,74 @@ impl TimeLeft {
     fn estimate(&mut self, fraction: f64, now: Duration) -> Estimate {
         let from = Progress::at(Stage::Copy, IMPORT_FROM).fraction;
         let to = Progress::at(Stage::Copy, IMPORT_TO).fraction;
+        let since = |at: Duration| now.saturating_sub(at).as_secs_f64();
         if fraction >= Stage::Finish.range().0 {
             return Estimate::AlmostDone;
+        }
+        if fraction >= Stage::Bootloader.range().0 - 1e-9 {
+            if self.deployed.is_none() {
+                // known to the second: the clock goes straight to it
+                self.finish = None;
+                self.ran_out = false;
+            }
+            let deployed = *self.deployed.get_or_insert(now);
+            return secs(POST_SECS - since(deployed));
+        }
+        if fraction >= to - 1e-9 {
+            let ended = *self.ended.get_or_insert_with(|| {
+                if self.began.is_some() {
+                    return now.as_secs_f64();
+                }
+                // followed from the deploy on: how long it has run, from how
+                // far BootcProgress has eased it
+                let (a, b) = Stage::Deploy.range();
+                let eased = ((fraction - a) / (b - a) / 0.99).clamp(0.0, 0.99);
+                now.as_secs_f64() + DEPLOY_SECS * (1.0 - eased).ln()
+            });
+            return secs(after_import(self.import) - (now.as_secs_f64() - ended));
         }
         if fraction < from - 1e-9 {
             return Estimate::Calculating;
         }
-        if fraction < to - 1e-9 {
-            // timed from the first movement: bootc can sit a while between
-            // its "layers needed" line and the first layer
-            if self.began.is_none() && fraction <= from + 1e-9 {
-                return Estimate::Calculating;
-            }
-            let (f_began, began) = *self.began.get_or_insert((fraction, now));
-            let since = now.saturating_sub(began).as_secs_f64();
-            if since < SEED_SECS {
-                // the average since the start: a moving average would still
-                // lean on its first, unrepresentative samples
-                if since > 0.0 {
-                    self.rate = Some((fraction - f_began).max(0.0) / since);
-                }
-            } else if let Some((f0, t0)) = self.last {
-                let dt = now.saturating_sub(t0).as_secs_f64();
-                if dt > 0.0 {
-                    let r = (fraction - f0).max(0.0) / dt;
-                    let a = 1.0 - (-dt / RATE_SECS).exp();
-                    self.rate = Some(self.rate.map_or(r, |old| old + a * (r - old)));
-                }
-            }
-            self.last = Some((fraction, now));
-            return match self.rate {
-                Some(r) if r > 0.0 && since >= WARMUP_SECS => {
-                    secs((to - fraction) / r + AFTER_IMPORT_SECS)
-                }
-                _ => Estimate::Calculating,
-            };
+        // timed from the first movement: bootc can sit a while between its
+        // "layers needed" line and the first layer
+        if self.began.is_none() && fraction <= from + 1e-9 {
+            return Estimate::Calculating;
         }
-        let ended = *self.ended.get_or_insert(now);
-        secs(AFTER_IMPORT_SECS - now.saturating_sub(ended).as_secs_f64())
+        let (f_began, began) = *self.began.get_or_insert((fraction, now));
+        let elapsed = since(began);
+        if elapsed < SEED_SECS {
+            // the average since the start: a moving average would still lean
+            // on its first, unrepresentative samples
+            if elapsed > 0.0 {
+                self.rate = Some((fraction - f_began).max(0.0) / elapsed);
+            }
+        } else if let Some((f0, t0)) = self.last {
+            let dt = since(t0);
+            if dt > 0.0 {
+                let r = (fraction - f0).max(0.0) / dt;
+                let a = 1.0 - (-dt / RATE_SECS).exp();
+                self.rate = Some(self.rate.map_or(r, |old| old + a * (r - old)));
+            }
+        }
+        self.last = Some((fraction, now));
+        match self.rate {
+            Some(r) if r > 0.0 && elapsed >= WARMUP_SECS => {
+                let rest = (to - fraction) / r;
+                // with what came before the UI followed, at today's speed
+                let import = (f_began - from) / r + elapsed + rest;
+                self.import = Some(import);
+                secs(rest + after_import(Some(import)))
+            }
+            _ => Estimate::Calculating,
+        }
     }
+}
+
+/// Seconds from the last layer to the end, after an import of `import`
+/// seconds (if it was timed).
+fn after_import(import: Option<f64>) -> f64 {
+    import.map_or(AFTER_SECS, |i| AFTER_BASE_SECS + AFTER_PER_IMPORT * i)
 }
 
 fn secs(left: f64) -> Estimate {
@@ -526,12 +584,13 @@ mod tests {
             Stage::Partition,
             Stage::Format,
             Stage::Copy,
+            Stage::Deploy,
             Stage::Bootloader,
             Stage::Settings,
             Stage::Finish,
         ];
         assert_eq!(all[0].range().0, 0.0);
-        assert_eq!(all[6].range().1, 1.0);
+        assert_eq!(all[7].range().1, 1.0);
         for w in all.windows(2) {
             assert_eq!(w[0].range().1, w[1].range().0);
         }
@@ -566,6 +625,7 @@ mod tests {
         let c = at(&mut p, 10_000).unwrap();
         assert!(a < b && b < c);
         assert!(c < Progress::at(Stage::Copy, 0.91).fraction);
+        assert_eq!(p.current().stage, Stage::Copy);
         assert_eq!(at(&mut p, 10_001), None, "no change, no signal");
         // a later milestone wins, and the easing stops
         let d = p
@@ -575,6 +635,7 @@ mod tests {
             )
             .unwrap();
         assert!(d.fraction > c);
+        assert_eq!(d.stage, Stage::Deploy);
         assert_eq!(at(&mut p, 20_000), Some(d.fraction), "only the heartbeat");
     }
 
@@ -600,25 +661,28 @@ mod tests {
         assert_eq!(p.counted(Some((2 << 20, GB)), 0, s(31)), None);
         // half the bytes and a tenth of the layers: 30 % of the import
         let x = p.counted(Some((GB / 2, GB)), 10, s(32)).unwrap().fraction;
-        assert!((x - within(0.06 + 0.84 * 0.3)).abs() < 1e-9 && x > eased);
+        assert!((x - within(0.06 + 0.94 * 0.3)).abs() < 1e-9 && x > eased);
         // time alone no longer moves it, past the heartbeat
         assert_eq!(p.tick(s(33)), None);
         assert_eq!(p.tick(s(37)).unwrap().fraction, x);
         // more bytes than the image: short of the end while layers remain
         let y = p.counted(Some((2 * GB, GB)), 80, s(40)).unwrap().fraction;
-        assert!((y - within(0.06 + 0.84 * 0.9)).abs() < 1e-9);
-        // all in: the end of the import, then the silent deploy eases on
-        let end = p.counted(Some((GB, GB)), 100, s(50)).unwrap().fraction;
-        assert!((end - within(IMPORT_TO)).abs() < 1e-9);
+        assert!((y - within(0.06 + 0.94 * 0.9)).abs() < 1e-9);
+        // all in: the end of the copy, then the silent deploy eases on
+        let deploy = |x: f64| Progress::at(Stage::Deploy, x).fraction;
+        let end = p.counted(Some((GB, GB)), 100, s(50)).unwrap();
+        assert_eq!(end.stage, Stage::Deploy);
+        assert!((end.fraction - within(IMPORT_TO)).abs() < 1e-9);
+        assert!((end.fraction - deploy(0.0)).abs() < 1e-9);
         assert_eq!(p.counted(Some((GB, GB)), 100, s(52)), None);
         let a = p.tick(s(110)).unwrap().fraction;
         let b = p.tick(s(10_000)).unwrap().fraction;
-        assert!(end < a && a < b && b < within(0.99) + 1e-9);
+        assert!(end.fraction < a && a < b && b < deploy(0.99) + 1e-9);
         // the deploy line, then nothing but the line and heartbeat matter
         let d = p
             .line("Deploying container image...done (87 seconds)", s(10_001))
             .unwrap();
-        assert!((d.fraction - within(1.0)).abs() < 1e-9);
+        assert!((d.fraction - deploy(1.0)).abs() < 1e-9);
         assert_eq!(p.counted(Some((5 * GB, GB)), 200, s(10_002)), None);
         assert_eq!(p.tick(s(10_003)), None);
     }
@@ -689,12 +753,12 @@ mod tests {
         p.line("layers already present: 2; layers needed: 10 (1 GB)", s(0));
         assert_eq!(p.counted(None, 2, s(1)), None, "only the layers present");
         let x = p.counted(None, 7, s(2)).unwrap().fraction;
-        assert!((x - within(0.06 + 0.84 * 0.5)).abs() < 1e-9);
+        assert!((x - within(0.06 + 0.94 * 0.5)).abs() < 1e-9);
         // no layer count in bootc's line: bytes alone
         let mut p = BootcProgress::default();
         p.line("layers already present: some", s(0));
         let x = p.counted(Some((GB / 4, GB)), 3, s(1)).unwrap().fraction;
-        assert!((x - within(0.06 + 0.84 * 0.25)).abs() < 1e-9);
+        assert!((x - within(0.06 + 0.94 * 0.25)).abs() < 1e-9);
         // neither: the easing goes on
         let mut p = BootcProgress::default();
         p.line("layers already present: some", s(0));
@@ -720,6 +784,11 @@ mod tests {
         clock
             .split(':')
             .try_fold(0, |a, n| Some(a * 60 + n.parse::<i64>().ok()?))
+    }
+
+    /// Seconds from the last layer to the end, after `import` seconds of it.
+    fn after(import: f64) -> i64 {
+        after_import(Some(import)).round() as i64
     }
 
     /// Asserts `text` shows `secs` left, give or take `slack`.
@@ -748,28 +817,45 @@ mod tests {
         let bar = |s: u64| match s {
             0..103 => Progress::at(Stage::Format, s as f64 / 103.0).fraction,
             103..833 => a + (b - a) * (s - 103) as f64 / 730.0,
-            _ => Progress::at(Stage::Copy, 0.92).fraction,
+            _ => Progress::at(Stage::Deploy, 0.5).fraction,
         };
+        let after = after(730.0);
         let mut t = TimeLeft::default();
         assert_eq!(t.text(0.0, Duration::ZERO), "Calculating the time left…");
         assert_eq!(follow(&mut t, 0, 100, bar), "Calculating the time left…");
         // the speed isn't believed in the first seconds
         assert_eq!(follow(&mut t, 102, 112, bar), "Calculating the time left…");
-        // then, all the way: what is left of the import, and 170 s after it
+        // then, all the way: what is left of the import, and the time after
         let mut s = 120;
         while s < 834 {
             about(
                 &t.text(bar(s), Duration::from_secs(s)),
-                833 - s as i64 + 170,
+                833 - s as i64 + after,
                 2,
             );
             // the clock runs down between samples
-            about(&t.tick(Duration::from_secs(s + 1)), 833 - s as i64 + 169, 2);
+            about(
+                &t.tick(Duration::from_secs(s + 1)),
+                833 - s as i64 + after - 1,
+                2,
+            );
             s += 2;
         }
-        // the deploy: the fixed time after the import runs out
-        about(&follow(&mut t, 834, 900, bar), 170 - 66, 2);
-        assert_eq!(t.tick(Duration::from_secs(1004)), "Almost done");
+        // the deploy: the time after the import runs out
+        about(&follow(&mut t, 834, 900, bar), after - 66, 2);
+        // it took longer: "Almost done", then bootc's line starts the last
+        // few seconds
+        assert_eq!(
+            t.tick(Duration::from_secs(833 + after as u64 + 2)),
+            "Almost done"
+        );
+        let deployed = Progress::at(Stage::Bootloader, 0.0).fraction;
+        about(
+            &t.text(deployed, Duration::from_secs(1000)),
+            POST_SECS as i64,
+            1,
+        );
+        about(&t.tick(Duration::from_secs(1004)), POST_SECS as i64 - 4, 1);
         assert_eq!(
             t.text(Stage::Finish.range().0, Duration::from_secs(1010)),
             "Almost done"
@@ -784,8 +870,8 @@ mod tests {
         let at = |s: u64| a + (b - a) * (s.saturating_sub(10) as f64 / 600.0).min(1.0);
         let mut t = TimeLeft::default();
         assert_eq!(follow(&mut t, 0, 24, at), "Calculating the time left…");
-        // 610 - 28 s of import and 170 s after it
-        about(&follow(&mut t, 26, 28, at), 610 - 28 + 170, 2);
+        // 610 - 28 s of import, and the time after 600 s of it
+        about(&follow(&mut t, 26, 28, at), 610 - 28 + after(600.0), 2);
     }
 
     #[test]
@@ -802,14 +888,13 @@ mod tests {
             a + (b - a) * done.min(1.0)
         };
         let mut t = TimeLeft::default();
-        // 180 s of import left plus 170 s after
-        about(&follow(&mut t, 0, 120, at), 350, 2);
+        // 180 s of import left, and the time after 300 s of it
+        let first = follow(&mut t, 0, 120, at);
+        about(&first, 180 + after(300.0), 2);
         // two minutes at the new speed, with less left to do: the average
-        // has moved half way to it (0.5 left at 0.0021 a second, 236 s, and
-        // 170 s after it), the clock about 20 s behind that
+        // has moved toward it, and the clock with it
         let later = follow(&mut t, 122, 240, at);
-        about(&later, 385, 10);
-        assert!(left(&later) > Some(350));
+        assert!(left(&later) > left(&first), "{first}, then {later}");
     }
 
     /// The copy in the VM (7.10 GB, 127 layers), every 30 s: GB handed to
@@ -833,8 +918,8 @@ mod tests {
             s(0),
         );
         let mut t = TimeLeft::default();
-        // the last layer at 1080 s, and 170 s after it
-        let end = 1080 + 170;
+        // the last layer at 1080 s, and the time after it
+        let end = 1080 + after(1080.0);
         let mut before: Option<i64> = None;
         let mut rises = 0;
         for now in (0..1080).step_by(2) {
@@ -851,13 +936,15 @@ mod tests {
             let n = left(&text).unwrap_or_else(|| panic!("{now} s: {text}"));
             // a 30 s average showed from 7 minutes to over 2 hours here; the
             // slow first five minutes still make it high for a while
-            let off = n - (end - now) as i64;
+            let off = n - (end - now as i64);
             assert!(
                 (-270..=360).contains(&off),
                 "{now} s: {text}, off by {off} s"
             );
+            // (the time after the import grows with it, so a high estimate
+            // of the import is a little higher still)
             if now >= 420 {
-                assert!(off.abs() <= 120, "{now} s: {text}, off by {off} s");
+                assert!(off.abs() <= 130, "{now} s: {text}, off by {off} s");
             }
             // a clock, not a jumping number: it moves a few seconds at a
             // time, and once the copy has settled, mostly down
@@ -878,9 +965,111 @@ mod tests {
             p.tick(s(now));
             text = t.text(p.current().fraction, s(now));
         }
-        assert!(p.current().fraction > Progress::at(Stage::Copy, IMPORT_TO).fraction);
-        // 170 s after the last layer, about 65 s of it gone
-        about(&text, 105, 10);
+        assert_eq!(p.current().stage, Stage::Deploy);
+        // the time after the last layer, 60 s of it gone
+        about(&text, after(1080.0) - 60, 10);
+    }
+
+    /// The timed install on real disks: bootc's "layers needed" line at
+    /// 24 s, the copy slow, then fast, then in between (8, 20 and 11 MB/s,
+    /// 7.25 GB, 127 layers), the last layer at 570 s, the deploy done at
+    /// 691 s and the install at 695 s. Gives the seconds shown and the
+    /// seconds truly left, every two seconds from a minute in.
+    fn real_install() -> Vec<(u64, i64, i64)> {
+        let s = Duration::from_secs;
+        let total = 7248;
+        let mb = |t: u64| match t {
+            ..24 => 0,
+            24..150 => (t - 24) * 8,
+            150..330 => 1008 + (t - 150) * 20,
+            _ => (4608 + (t - 330) * 11).min(total),
+        };
+        let mut p = BootcProgress::default();
+        let mut t = TimeLeft::default();
+        let mut seen = Vec::new();
+        for now in (0..=694).step_by(2) {
+            if now == 24 {
+                p.line(
+                    "layers already present: 0; layers needed: 127 (7.25\u{a0}GB)",
+                    s(now),
+                );
+            }
+            if now == 692 {
+                p.line("Deploying container image...done (52 seconds)", s(now));
+                p.line("Installing bootloader via bootupd", s(now));
+            }
+            let m = mb(now);
+            let bytes = Some((m * 1_000_000, total * 1_000_000));
+            p.counted(bytes, m * 127 / total, s(now))
+                .or_else(|| p.tick(s(now)));
+            let text = t.text(p.current().fraction, s(now));
+            if now >= 60 {
+                let n = left(&text).unwrap_or_else(|| panic!("{now} s: {text}"));
+                seen.push((now, n, 695 - now as i64));
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn a_real_install_counts_down_to_the_end() {
+        let seen = real_install();
+        for w in seen.windows(2) {
+            let ((_, b, _), (now, n, _)) = (w[0], w[1]);
+            assert!((-14..=12).contains(&(n - b)), "{now} s: from {b} to {n} s");
+        }
+        for &(now, n, truth) in &seen {
+            let off = n - truth;
+            let most = match now {
+                // the slow start can't tell of the fast middle
+                ..240 => 450,
+                // the speed more than halves at 330 s: the clock follows
+                240..572 => 100,
+                // after the last layer: the time after it, counted down
+                _ => 15,
+            };
+            assert!(off.abs() <= most, "{now} s: {n} s left, off by {off} s");
+        }
+    }
+
+    #[test]
+    fn a_ui_that_follows_from_the_deploy_on_counts_what_is_left() {
+        let s = Duration::from_secs;
+        // 60 s into the deploy, eased as BootcProgress does
+        let mut p = BootcProgress::default();
+        p.line("layers already present: 0; layers needed: 2", s(0));
+        p.counted(None, 2, s(100));
+        p.tick(s(160));
+        assert_eq!(p.current().stage, Stage::Deploy);
+        let mut t = TimeLeft::default();
+        about(
+            &t.text(p.current().fraction, s(5)),
+            AFTER_SECS as i64 - 60,
+            1,
+        );
+        // the UI restarted after the deploy: the last few seconds
+        let mut t = TimeLeft::default();
+        let deployed = Progress::at(Stage::Bootloader, 0.0).fraction;
+        about(&t.text(deployed, s(5)), POST_SECS as i64, 1);
+        about(&t.tick(s(8)), POST_SECS as i64 - 3, 1);
+    }
+
+    #[test]
+    fn the_deploy_line_before_the_last_count_moves_on() {
+        let s = Duration::from_secs;
+        let mut p = BootcProgress::default();
+        p.line("layers already present: 0; layers needed: 100", s(0));
+        let a = p.counted(None, 60, s(10)).unwrap();
+        let d = p
+            .line("Deploying container image...done (52 seconds)", s(20))
+            .unwrap();
+        assert_eq!(d.stage, Stage::Deploy);
+        assert!(a.fraction < d.fraction);
+        // the counts that come late change nothing
+        assert_eq!(p.counted(None, 100, s(22)), None);
+        assert_eq!(p.tick(s(23)), None);
+        let b = p.line("Installing bootloader via bootupd", s(24)).unwrap();
+        assert!(d.fraction < b.fraction);
     }
 
     #[test]
@@ -889,7 +1078,7 @@ mod tests {
         let b = Progress::at(Stage::Copy, IMPORT_TO).fraction;
         let at = |s: u64| a + (b - a) * (s.min(60) as f64 / 600.0);
         let mut t = TimeLeft::default();
-        about(&follow(&mut t, 0, 60, at), 540 + 170, 2);
+        about(&follow(&mut t, 0, 60, at), 540 + after(600.0), 2);
         // the average falls by e every 3 minutes: past 3 hours after 9
         assert_ne!(follow(&mut t, 62, 500, at), "Calculating the time left…");
         assert_eq!(follow(&mut t, 502, 700, at), "Calculating the time left…");
@@ -913,7 +1102,7 @@ mod tests {
         let b = Progress::at(Stage::Copy, IMPORT_TO).fraction;
         let at = |s: u64| a + (b - a) * (s.min(600) as f64 / 600.0);
         let mut t = TimeLeft::default();
-        about(&follow(&mut t, 0, 100, at), 500 + 170, 2);
+        about(&follow(&mut t, 0, 100, at), 500 + after(600.0), 2);
         // the clock runs out, and a later estimate just past it doesn't
         // bring it back for a moment
         t.finish = Some(110.0);
@@ -932,8 +1121,8 @@ mod tests {
         let at = |s: u64| a + (b - a) * ((s + 400).min(600) as f64 / 600.0);
         let mut t = TimeLeft::default();
         assert_eq!(t.text(at(0), Duration::ZERO), "Calculating the time left…");
-        // 200 s - 20 s of import, and 170 s after it
-        about(&follow(&mut t, 2, 20, at), 180 + 170, 2);
+        // 200 s - 20 s of import, and the time after all 600 s of it
+        about(&follow(&mut t, 2, 20, at), 180 + after(600.0), 2);
     }
 
     #[test]

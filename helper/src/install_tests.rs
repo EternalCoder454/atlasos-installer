@@ -2562,7 +2562,7 @@ fn the_copy_moves_the_bar_by_the_bytes_copied() {
         seen.push(p.clone())
     })
     .unwrap();
-    let half = Progress::at(Stage::Copy, 0.06 + 0.84 * 0.5).fraction;
+    let half = Progress::at(Stage::Copy, 0.06 + 0.94 * 0.5).fraction;
     assert!(
         seen.iter().any(|p| (p.fraction - half).abs() < 1e-9),
         "{seen:?}"
@@ -2594,4 +2594,54 @@ fn without_the_image_size_the_copy_still_finishes() {
     assert!(seen.windows(2).all(|p| p[0].fraction <= p[1].fraction));
     let log = fs::read_to_string(w.env.log_path()).unwrap();
     assert!(log.contains("# the image's size is unknown"), "{log}");
+}
+
+#[test]
+fn the_copy_log_stops_when_the_layers_are_in() {
+    let w = World::new();
+    let log = Log::create(&w.env.log_path());
+    let mut c = CopyLog::default();
+    let s = Duration::from_secs;
+    const GB: u64 = 1_000_000_000;
+    // nothing copied yet: no line
+    c.note(&log, Some((0, 4 * GB)), 0, false, s(0));
+    // the first count starts the clock; a line every 30 s
+    c.note(&log, Some((GB / 2, 4 * GB)), 10, false, s(2));
+    c.note(&log, Some((GB, 4 * GB)), 20, false, s(20));
+    c.note(&log, Some((2 * GB, 4 * GB)), 60, false, s(32));
+    // all in: a last line at once, then none
+    c.note(&log, Some((4 * GB, 4 * GB)), 127, true, s(40));
+    c.note(&log, Some((5 * GB, 4 * GB)), 127, true, s(80));
+    c.note(&log, Some((5 * GB, 4 * GB)), 127, true, s(200));
+    let text = fs::read_to_string(w.env.log_path()).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("# copy")).collect();
+    assert_eq!(
+        lines,
+        [
+            "# copy: 2.00 GB of 4.00 GB (50 %), 50.0 MB/s, 60 layers imported",
+            "# copy: 4.00 GB of 4.00 GB (100 %), 250.0 MB/s, 127 layers imported",
+        ],
+        "{text}"
+    );
+}
+
+#[test]
+fn a_copy_in_at_the_first_look_still_gets_its_line() {
+    let w = World::new();
+    let log = Log::create(&w.env.log_path());
+    let mut c = CopyLog::default();
+    let s = Duration::from_secs;
+    c.note(&log, Some((4_000_000_000, 4_000_000_000)), 127, true, s(2));
+    c.note(&log, Some((4_000_000_000, 4_000_000_000)), 127, true, s(40));
+    // in by bootc's line before any count: no line, and done
+    let mut d = CopyLog::default();
+    d.note(&log, Some((0, 4_000_000_000)), 0, true, s(2));
+    assert!(d.ended);
+    let text = fs::read_to_string(w.env.log_path()).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("# copy")).collect();
+    assert_eq!(
+        lines,
+        ["# copy: 4.00 GB of 4.00 GB (100 %), 127 layers imported"],
+        "{text}"
+    );
 }

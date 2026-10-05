@@ -682,34 +682,59 @@ fn layers_imported(refs: &Path) -> u64 {
 }
 
 /// A line in the install log every [`COPY_NOTE`] while the layers import,
-/// so a slow copy can be read from the log alone.
+/// and one when they are all in, so a slow copy can be read from the log
+/// alone.
 #[derive(Default)]
 struct CopyLog {
     /// When the last line was written, and the byte count then.
     last: Option<(Duration, u64)>,
+    /// The copy is in, and its last line written.
+    ended: bool,
 }
 
 impl CopyLog {
-    fn note(&mut self, log: &Log, bytes: Option<(u64, u64)>, layers: u64, now: Duration) {
+    /// Notes the counts at `now`; `copied` once the layers are all in,
+    /// which writes the last line.
+    fn note(
+        &mut self,
+        log: &Log,
+        bytes: Option<(u64, u64)>,
+        layers: u64,
+        copied: bool,
+        now: Duration,
+    ) {
+        if self.ended {
+            return;
+        }
+        self.ended = copied;
         let done = bytes.map_or(0, |(d, _)| d);
         if done == 0 && layers == 0 {
             return;
         }
-        let Some((then, before)) = self.last else {
-            self.last = Some((now, done));
-            return;
-        };
-        if now.saturating_sub(then) < COPY_NOTE {
+        if let Some((then, _)) = self.last
+            && !copied
+            && now.saturating_sub(then) < COPY_NOTE
+        {
             return;
         }
-        let secs = now.saturating_sub(then).as_secs_f64();
+        if self.last.is_none() && !copied {
+            self.last = Some((now, done));
+            return;
+        }
+        // no speed on a copy that was in at the first look
+        let speed = self.last.map_or(String::new(), |(then, before)| {
+            let secs = now.saturating_sub(then).as_secs_f64().max(1.0);
+            format!(
+                ", {:.1} MB/s",
+                done.saturating_sub(before) as f64 / secs / 1e6
+            )
+        });
         log.note(&match bytes {
             Some((done, total)) => format!(
-                "# copy: {} of {} ({:.0} %), {:.1} MB/s, {layers} layers imported",
+                "# copy: {} of {} ({:.0} %){speed}, {layers} layers imported",
                 gb(done),
                 gb(total),
                 100.0 * done as f64 / total as f64,
-                done.saturating_sub(before) as f64 / secs / 1e6,
             ),
             None => format!("# copy: {layers} layers imported"),
         });
@@ -2042,12 +2067,13 @@ fn execute(
             Some(l) => bp.line(l, now),
             None => {
                 let mut moved = None;
-                if now >= next_sample {
+                // the counts matter only until the layers are in
+                if !copy_log.ended && now >= next_sample {
                     next_sample = now + COPY_SAMPLE;
                     let bytes = total.map(|t| (meter.sample(), t));
                     let layers = layers_imported(&refs);
                     moved = bp.counted(bytes, layers, now);
-                    copy_log.note(log, bytes, layers, now);
+                    copy_log.note(log, bytes, layers, bp.copied(), now);
                 }
                 moved.or_else(|| bp.tick(now))
             }

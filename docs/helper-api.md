@@ -192,7 +192,7 @@ this path needs nothing from the medium.
 
 | Field | Meaning |
 |---|---|
-| `step` | `prepare`, `partition`, `format`, `copy`, `bootloader`, `settings` or `finish` |
+| `step` | `prepare`, `partition`, `format`, `copy`, `deploy`, `bootloader`, `settings` or `finish` |
 | `fraction` | Progress through the whole install, from 0 to 1. It never goes backwards. |
 | `text` | Text to show the user. |
 
@@ -204,11 +204,13 @@ process group) has handed it, against the image's uncompressed size from
 file and then to bootc, so half of what it writes); and the layers imported
 (one ref each in the new system), against bootc's "layers needed". Either
 share alone does if the other can't be read, and with neither the bar eases
-forward with time. Once all is copied, the bar eases on while bootc merges
-and deploys the layers, which it does silently (about 3 minutes in the VM).
-The install log gets a line about the copy (amount, speed, layers) every 30
-seconds. While bootc runs, Progress is sent at least every 5 seconds, even
-when unchanged, so a UI can keep a time estimate current.
+forward with time. Once all is copied (by the layer count), the `deploy`
+step begins: the bar eases on while bootc merges and deploys the layers,
+which it does silently (about 2 minutes, longer on slow disks), until its
+"Deploying container image...done" line. The install log gets a line about
+the copy (amount, speed, layers) every 30 seconds, and a last one when the
+layers are all in. While bootc runs, Progress is sent at least every 5
+seconds, even when unchanged, so a UI can keep a time estimate current.
 
 ## Errors
 

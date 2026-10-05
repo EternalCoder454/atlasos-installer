@@ -247,22 +247,23 @@ pub async fn connect(ssid: &str, password: &str) -> Result<String, String> {
     Ok("6f1c9a52-0d4e-4b7a-9c3e-2a5f8e7d1b04".into())
 }
 
-const STEPS: &[(f64, &str)] = &[
-    (0.00, "Getting ready"),
-    (0.02, "Creating partitions"),
-    (0.04, "Formatting"),
-    (0.07, "Copying AtlasOS"),
-    (0.85, "Installing the bootloader"),
-    (0.93, "Applying your settings"),
-    (0.97, "Finishing up"),
-];
-
+/// The helper's text at `f`: the stage it falls in.
 fn text_at(f: f64) -> &'static str {
-    STEPS
-        .iter()
-        .rev()
-        .find(|(start, _)| f >= *start)
-        .map_or("Getting ready", |s| s.1)
+    use installer_core::progress::Stage;
+    [
+        Stage::Prepare,
+        Stage::Partition,
+        Stage::Format,
+        Stage::Copy,
+        Stage::Deploy,
+        Stage::Bootloader,
+        Stage::Settings,
+        Stage::Finish,
+    ]
+    .into_iter()
+    .rev()
+    .find(|s| f >= s.range().0)
+    .map_or("Getting ready", Stage::text)
 }
 
 /// About 20 seconds from start to finish (2 with `fast`).
@@ -412,6 +413,7 @@ mod tests {
     fn stage_texts() {
         assert_eq!(text_at(0.0), "Getting ready");
         assert_eq!(text_at(0.5), "Copying AtlasOS");
+        assert_eq!(text_at(0.8), "Setting up AtlasOS");
         assert_eq!(text_at(0.99), "Finishing up");
     }
 }
