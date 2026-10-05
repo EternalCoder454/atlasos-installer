@@ -1,7 +1,7 @@
 #!/bin/bash
 # Screenshots of the demo UI, headless. Runs inside the dev container:
 #   app/dev.sh app/tools/screenshot.sh OUT.png [STEP] [FLAGS] [light|dark] [WAIT]
-# STEP is a step key (welcome, keyboard, wifi, disk, review, progress,
+# STEP is a step key (welcome, keyboard, wifi, apps, disk, review, progress,
 # restart), FLAGS the demo flags (see src/demo.rs), WAIT seconds before the
 # shot (default 3). Set SCALE=1.5 to match a 1.5x desktop, and ATLAS=1 for
 # the AtlasOS colours and font (IBM Plex Sans) instead of Breeze's. A run

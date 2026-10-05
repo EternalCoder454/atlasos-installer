@@ -6,7 +6,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import Atlas.Ui
 
-// Step 4: which disk, then erase it or use its free space.
+// Step 5: which disk, then erase it or use its free space.
 InstallerPage {
     id: page
 

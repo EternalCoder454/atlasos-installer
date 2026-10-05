@@ -22,6 +22,7 @@ pub trait InstallerHelper1 {
         wifi_uuid: &str,
         encryption: &str,
         password: &str,
+        apps: &[String],
     ) -> zbus::Result<String>;
     fn status(&self) -> zbus::Result<String>;
     fn reboot(&self) -> zbus::Result<()>;
@@ -158,6 +159,7 @@ pub async fn list_disks() -> Result<String, Error> {
 /// Runs the install, handing each Progress signal to `progress`.
 pub async fn install(
     args: [String; 8],
+    apps: Vec<String>,
     progress: impl Fn(f64, String) + Send + 'static,
 ) -> Result<String, Error> {
     let p = proxy().await?;
@@ -171,8 +173,10 @@ pub async fn install(
         }
     });
     let [disk, fp, mode, locale, keymap, wifi, encryption, password] = &args;
-    let r = retry_once!(p.install(disk, fp, mode, locale, keymap, wifi, encryption, password))
-        .map_err(map);
+    let r = retry_once!(p.install(
+        disk, fp, mode, locale, keymap, wifi, encryption, password, &apps
+    ))
+    .map_err(map);
     drop(args);
     forward.abort();
     r

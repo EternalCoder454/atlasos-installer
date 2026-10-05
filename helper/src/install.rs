@@ -17,7 +17,7 @@ use installer_core::plan::{EspInfo, Mode, Plan, Role};
 use installer_core::progress::{BootcProgress, Progress, Stage};
 use installer_core::settings::{self, Keymap};
 use installer_core::table::{Table, partition_number};
-use installer_core::{efi, gpt, grub};
+use installer_core::{apps, efi, gpt, grub};
 use serde::Serialize;
 
 use crate::run::{self, Cmd, Output, Runner, bin, lock, run};
@@ -98,6 +98,8 @@ pub struct Request {
     pub encryption: Encryption,
     /// The disk password (`Password`) or PIN (`TpmPin`); empty otherwise.
     pub password: Secret,
+    /// The apps the new system adds at its first start (see [`apps`]).
+    pub apps: Vec<&'static apps::App>,
 }
 
 /// A secret that `Debug` doesn't show; it serializes as the real value, for
@@ -195,7 +197,15 @@ impl Request {
             wifi_uuid,
             encryption,
             password: Secret(password.into()),
+            apps: Vec::new(),
         })
+    }
+
+    /// The apps to add at the first start, by ID: each must be on the list
+    /// (`firstboot/apps.json`), with at most one browser.
+    pub fn with_apps(mut self, ids: &[String]) -> Result<Request, String> {
+        self.apps = apps::validate(ids)?;
+        Ok(self)
     }
 }
 
@@ -1773,6 +1783,43 @@ fn save_logs(r: &dyn Runner, env: &Env, log: &Log, deploy: &Path) {
     }
 }
 
+enum AppsError {
+    NotSaved(String),
+    /// Saved, but its label may be wrong.
+    Label(String),
+}
+
+/// Records the chosen apps in the new system's `/var`, for its first start
+/// to add once it is online. Nothing is written when none were chosen.
+fn save_apps(
+    r: &dyn Runner,
+    log: &Log,
+    deploy: &Path,
+    chosen: &[&apps::App],
+) -> Result<(), AppsError> {
+    if chosen.is_empty() {
+        return Ok(());
+    }
+    let Some(stateroot) = deploy.parent().and_then(Path::parent) else {
+        return Err(AppsError::NotSaved(format!(
+            "no stateroot above {}",
+            deploy.display()
+        )));
+    };
+    let rel = format!("var/{}", apps::RECORD);
+    let mut written =
+        write_file(stateroot, &rel, &apps::record(chosen), 0o644).map_err(AppsError::NotSaved)?;
+    // Each account's first login reads it: open whatever the umask.
+    for dir in &written {
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o755))
+            .map_err(|e| AppsError::NotSaved(format!("cannot open up {}: {e}", dir.display())))?;
+    }
+    written.push(stateroot.join(&rel));
+    let ids: Vec<&str> = chosen.iter().map(|a| a.id.as_str()).collect();
+    log.note(&format!("# apps for the first start: {}", ids.join(" ")));
+    relabel(r, deploy, stateroot, &written).map_err(AppsError::Label)
+}
+
 /// Give files written into the new system the SELinux labels its own policy
 /// wants (`root` is the path the files are at `/` under).
 fn relabel(
@@ -2352,6 +2399,15 @@ fn execute(
                 "The NVIDIA key could not be queued ({e}). After restarting, run sudo /usr/libexec/atlasos/nvidia-enroll-key."
             )),
         }
+    }
+    match save_apps(r, log, &deploy, &req.apps) {
+        Ok(()) => {}
+        Err(AppsError::NotSaved(e)) => warnings.push(format!(
+            "The apps you picked could not be saved for the first start ({e}). Add them from Discover after restarting."
+        )),
+        Err(AppsError::Label(e)) => warnings.push(format!(
+            "The list of apps to add at the first start may have the wrong SELinux label ({e}). After restarting, run sudo restorecon -R /var/lib/atlasos."
+        )),
     }
     save_logs(r, env, log, &deploy);
     // Installed by now: a failure here is not a failed install.

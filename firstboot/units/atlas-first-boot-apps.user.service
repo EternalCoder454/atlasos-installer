@@ -1,0 +1,22 @@
+[Unit]
+Description=Add your chosen AtlasOS apps (developer tools)
+# Runs when the record has per-account apps, or when a result is waiting to be shown.
+ConditionPathExists=|/var/lib/atlasos/first-boot-apps.json
+ConditionPathExists=|/var/lib/atlasos/first-boot-apps.status
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/atlasos/atlas-first-boot-apps user
+TimeoutStartSec=6h
+Restart=on-failure
+RestartSec=60
+RestartSteps=5
+RestartMaxDelaySec=30min
+RestartPreventExitStatus=78
+# No NoNewPrivileges or PrivateTmp: rootless podman's newuidmap and the toolbox's
+# sudo are setuid and would break.
+LockPersonality=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=graphical-session.target

@@ -70,7 +70,7 @@ These devices are always hidden:
 
 To read EFI partitions, ListDisks mounts them read-only.
 
-### `Install(disk_id s, fingerprint s, mode s, locale s, keymap s, wifi_uuid s, encryption s, password s) → s`
+### `Install(disk_id s, fingerprint s, mode s, locale s, keymap s, wifi_uuid s, encryption s, password s, apps as) → s`
 
 Polkit action: `net.eterneon.atlas.installer.install`. An active local
 session needs admin authentication (`auth_admin_keep`). Other sessions are
@@ -85,6 +85,7 @@ refused.
 | `wifi_uuid` | A NetworkManager connection to copy into the new system, or an empty string. |
 | `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false. |
 | `password` | For `password`: the disk password, 8 to 256 characters. For `tpm-pin`: the PIN, 4 to 64 characters. Printable ASCII only (space to `~`): the initramfs prompt can't reliably type anything else (keymaps, dead keys, normalisation). An empty string for `none` and `tpm`; anything else is refused. |
+| `apps` | IDs from `firstboot/apps.json` (the "Choose your apps" page): each on the list, none twice, at most one browser. Anything else is refused. The install is offline, so it only records them in the new system as `/var/lib/atlasos/first-boot-apps.json` (`{"version": 1, "apps": [...]}`, root-owned, 0644); the new system adds them once it is online. Nothing is written for an empty list, and a failure to write it is a warning, not a failed install. |
 
 Install probes the disks again and decides everything before it writes
 anything. It refuses in these cases:

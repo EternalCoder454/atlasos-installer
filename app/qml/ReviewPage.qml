@@ -7,7 +7,7 @@ import org.kde.kirigami as Kirigami
 import Atlas.Ui
 import net.eterneon.atlas.installer
 
-// Step 5: everything in plain words, and exactly what happens to the disk.
+// Step 6: everything in plain words, and exactly what happens to the disk.
 InstallerPage {
     id: page
 
@@ -73,6 +73,12 @@ InstallerPage {
                     iconName: "network-wireless"
                     title: qsTr("Wi-Fi")
                     value: page.wifiText
+                }
+                SectionRow {
+                    iconName: "applications-all"
+                    title: qsTr("Apps")
+                    subtitle: qsTr("Added at the first start, once online.")
+                    value: page.app.backend.reviewApps(JSON.stringify(page.app.apps)) || qsTr("None")
                 }
                 SectionRow {
                     iconName: page.disk ? page.disk.icon : "drive-harddisk"

@@ -10,6 +10,7 @@ on:
     paths: &paths
       - app/**
       - crates/installer-core/**
+      - firstboot/apps.json
       # installer-core takes its edition and rust-version from the workspace.
       - Cargo.toml
       - .github/ci/**

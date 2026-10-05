@@ -1,0 +1,32 @@
+[Unit]
+Description=Install the apps chosen in the AtlasOS installer
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/var/lib/atlasos/first-boot-apps.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/atlasos/atlas-first-boot-apps system
+TimeoutStartSec=3h
+Restart=on-failure
+RestartSec=30
+RestartSteps=6
+RestartMaxDelaySec=30min
+# 78 is a failure that retrying cannot fix (damaged record, no flatpak).
+RestartPreventExitStatus=78
+# Flatpak needs user namespaces and /var. Its bwrap mounts /proc (apply_extra and
+# triggers), so ProtectKernelTunables and ProtectControlGroups stay off.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ProtectKernelModules=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

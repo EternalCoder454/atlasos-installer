@@ -35,6 +35,8 @@ QQC2.ApplicationWindow {
     property string keymap: "us"
     // The user picked a layout: a new language no longer changes it.
     property bool keymapChosen: false
+    // The chosen apps, as IDs from backend.appsJson (Brave, no tools, at first).
+    property var apps: JSON.parse(root.backend.appsDefault)
     // A view::DiskRow, or null.
     property var disk: null
     // "erase" or "free-space"
@@ -82,6 +84,7 @@ QQC2.ApplicationWindow {
         { key: "welcome", title: qsTr("Welcome") },
         { key: "keyboard", title: qsTr("Keyboard") },
         { key: "wifi", title: qsTr("Wi-Fi") },
+        { key: "apps", title: qsTr("Apps") },
         { key: "disk", title: qsTr("Disk") },
         { key: "review", title: qsTr("Review") },
         { key: "progress", title: qsTr("Install") },
@@ -103,6 +106,7 @@ QQC2.ApplicationWindow {
             "welcome": welcomePage,
             "keyboard": keyboardPage,
             "wifi": wifiPage,
+            "apps": appsPage,
             "disk": diskPage,
             "review": reviewPage,
             "progress": progressPage,
@@ -163,7 +167,7 @@ QQC2.ApplicationWindow {
             return;
         }
         root.installRefusal = "";
-        const accepted = root.backend.install(root.disk.id, root.disk.fingerprint, root.mode, root.language, root.keymap, root.wifiUuid, root.encryption, root.needsSecret ? root.password : "");
+        const accepted = root.backend.install(root.disk.id, root.disk.fingerprint, root.mode, root.language, root.keymap, root.wifiUuid, root.encryption, root.needsSecret ? root.password : "", JSON.stringify(root.apps));
         if (!accepted) {
             // The password stays, so the user can try again.
             root.show("review");
@@ -194,6 +198,10 @@ QQC2.ApplicationWindow {
         }
         root.encryptChoice = "";
         root.pinChoice = "";
+        // Keep what the Apps page chose, if the user was there.
+        if (root.reached < root.allIndex("apps")) {
+            root.apps = JSON.parse(root.backend.appsDefault);
+        }
         root.disk = d;
         root.mode = pick.mode;
         // The defaults want a PIN (a TPM with Secure Boot off): the Disk
@@ -242,7 +250,7 @@ QQC2.ApplicationWindow {
             root.mode = disks[0].freeOk ? "free-space" : "erase";
         }
         if (target === "wifi" && root.skipWifi) {
-            root.show("disk");
+            root.show("apps");
             return;
         }
         const later = ["review", "progress", "restart"];
@@ -288,7 +296,7 @@ QQC2.ApplicationWindow {
             root.skipWifi = !root.wifi.available || root.wifi.wired;
             // Already on the page when the answer came: move on.
             if (root.skipWifi && root.current === "wifi") {
-                root.show("disk");
+                root.show("apps");
             }
             root.openDemoPage();
         }
@@ -362,6 +370,12 @@ QQC2.ApplicationWindow {
     Component {
         id: wifiPage
         WifiPage {
+            app: root
+        }
+    }
+    Component {
+        id: appsPage
+        AppsPage {
             app: root
         }
     }

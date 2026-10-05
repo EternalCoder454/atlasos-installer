@@ -2844,3 +2844,71 @@ fn the_new_system_keeps_the_install_log_and_the_tpm_event_log() {
     let log = fs::read_to_string(w.env.log_path()).unwrap();
     assert!(log.contains("# not kept in the new system"), "{log}");
 }
+
+#[test]
+fn the_chosen_apps_are_recorded_for_the_first_start() {
+    use std::os::unix::fs::PermissionsExt;
+    let record = "ostree/deploy/default/var/lib/atlasos/first-boot-apps.json";
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let w = World::new();
+    let r = req("sda", "free-space")
+        .with_apps(&ids(&["gh", "firefox"]))
+        .unwrap();
+    let (out, _) = w.install(&r);
+    assert!(!out.unwrap().warnings.iter().any(|x| x.contains("apps")));
+    let path = w.env.target.join(record);
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "{\"apps\":[\"firefox\",\"gh\"],\"version\":1}\n"
+    );
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    let dir = path.parent().unwrap();
+    assert_eq!(
+        fs::metadata(dir).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    let labelled = w
+        .writes()
+        .into_iter()
+        .any(|c| c.starts_with("setfiles") && c.ends_with("var/lib/atlasos/first-boot-apps.json"));
+    assert!(labelled);
+
+    // none chosen: no record
+    let w = World::new();
+    w.install(&req("sda", "free-space")).0.unwrap();
+    assert!(!w.env.target.join(record).exists());
+
+    // anything not on the list is refused before the install starts
+    for bad in [
+        &["firefox", "brave"][..],
+        &["../../etc/passwd"],
+        &["gh", "gh"],
+    ] {
+        assert!(
+            req("sda", "free-space").with_apps(&ids(bad)).is_err(),
+            "{bad:?}"
+        );
+    }
+
+    // a link where the directory goes: the install still succeeds, with a
+    // warning, and nothing is written through the link
+    let w = World::new();
+    let outside = w.env.root.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    let var_lib = w.env.target.join("ostree/deploy/default/var/lib");
+    fs::create_dir_all(&var_lib).unwrap();
+    std::os::unix::fs::symlink(&outside, var_lib.join("atlasos")).unwrap();
+    let r = req("sda", "free-space")
+        .with_apps(&ids(&["brave"]))
+        .unwrap();
+    let out = w.install(&r).0.unwrap();
+    assert!(
+        out.warnings.iter().any(|x| x.contains("apps you picked")),
+        "{:?}",
+        out.warnings
+    );
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+}

@@ -564,6 +564,34 @@ pub fn follow(r: Reattach) -> Follow {
     }
 }
 
+/// The apps chosen by default: Brave, which AtlasOS has always shipped.
+pub fn default_apps() -> Vec<String> {
+    vec!["brave".to_string()]
+}
+
+/// The IDs the UI sends, a JSON array of strings, checked against the list
+/// (installer-core's `apps::validate`). Returns them in the list's order.
+pub fn parse_apps(json: &str) -> Result<Vec<String>, String> {
+    let ids: Vec<String> =
+        serde_json::from_str(json).map_err(|e| format!("bad list of apps: {e}"))?;
+    let apps = installer_core::apps::validate(&ids)?;
+    Ok(apps.iter().map(|a| a.id.clone()).collect())
+}
+
+/// The Review page's line for the chosen apps: their names, or "" for none
+/// (the page says "None", translated).
+pub fn apps_summary(json: &str) -> String {
+    match parse_apps(json) {
+        Ok(ids) if !ids.is_empty() => ids
+            .iter()
+            .filter_map(|id| installer_core::apps::find(id))
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -987,5 +1015,27 @@ mod tests {
             Reattach::Done(d) => assert_eq!(d.recovery_key, KEY),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn apps_are_checked_and_summarised() {
+        let cat = installer_core::apps::catalog();
+        assert_eq!(parse_apps("[]").unwrap(), Vec::<String>::new());
+        assert_eq!(apps_summary("[]"), "");
+        assert_eq!(apps_summary("not json"), "");
+        assert_eq!(apps_summary(r#"["nope"]"#), "");
+        assert!(parse_apps(r#"["brave","brave"]"#).is_err());
+        assert!(parse_apps(r#"["brave","firefox"]"#).is_err());
+        assert!(parse_apps(r#"[1]"#).is_err());
+        let brave = cat.iter().find(|a| a.id == "brave").unwrap();
+        assert_eq!(apps_summary(r#"["brave"]"#), brave.name);
+        let two = apps_summary(r#"["gh","brave"]"#);
+        assert!(two.starts_with(&brave.name) && two.contains(", "));
+    }
+
+    #[test]
+    fn the_default_apps_are_valid() {
+        let d = default_apps();
+        assert_eq!(parse_apps(&serde_json::to_string(&d).unwrap()).unwrap(), d);
     }
 }

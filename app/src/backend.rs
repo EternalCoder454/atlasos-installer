@@ -25,6 +25,10 @@ pub mod qobject {
         /// "loading", "ready" or "error".
         #[qproperty(QString, disks_state, cxx_name = "disksState")]
         #[qproperty(QString, disks_error, cxx_name = "disksError")]
+        /// installer-core's apps::catalog, in page order (read-only).
+        #[qproperty(QString, apps_json, cxx_name = "appsJson")]
+        /// The IDs chosen at first, a JSON array (view::default_apps).
+        #[qproperty(QString, apps_default, cxx_name = "appsDefault")]
         /// network::WifiState.
         #[qproperty(QString, wifi_json, cxx_name = "wifiJson")]
         /// The first Wi-Fi read is done (the page knows whether to show).
@@ -96,6 +100,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "applyKeymap"]
         fn apply_keymap(self: &Backend, keymap: &QString);
+        /// The Review page's line for the chosen apps (a JSON array of IDs).
+        #[qinvokable]
+        #[cxx_name = "reviewApps"]
+        fn review_apps(self: &Backend, apps: &QString) -> QString;
         /// "none", "tpm", "tpm-pin" or "password" (view::encryption_mode).
         #[qinvokable]
         #[cxx_name = "encryptionMode"]
@@ -140,6 +148,7 @@ pub mod qobject {
             wifi_uuid: &QString,
             encryption: &QString,
             password: &QString,
+            apps: &QString,
         ) -> bool;
         /// Every second while installing: the time left counts down.
         #[qinvokable]
@@ -285,6 +294,8 @@ pub struct BackendRust {
     demo: bool,
     languages_json: QString,
     layouts_json: QString,
+    apps_json: QString,
+    apps_default: QString,
     disks_json: QString,
     quick_disk: QString,
     disks_state: QString,
@@ -333,6 +344,11 @@ impl Default for BackendRust {
             demo: flags.is_some(),
             languages_json: q("[]"),
             layouts_json: q("[]"),
+            apps_json: q(&serde_json::to_string(installer_core::apps::catalog())
+                .unwrap_or_else(|_| "[]".into())),
+            apps_default: q(
+                &serde_json::to_string(&view::default_apps()).unwrap_or_else(|_| "[]".into())
+            ),
             disks_json: q("[]"),
             quick_disk: QString::default(),
             disks_state: q("loading"),
@@ -747,6 +763,10 @@ impl qobject::Backend {
         ))
     }
 
+    pub fn review_apps(&self, apps: &QString) -> QString {
+        q(&view::apps_summary(&apps.to_string()))
+    }
+
     pub fn install(
         mut self: Pin<&mut Self>,
         disk_id: &QString,
@@ -757,6 +777,7 @@ impl qobject::Backend {
         wifi_uuid: &QString,
         encryption: &QString,
         password: &QString,
+        apps: &QString,
     ) -> bool {
         if self.install_state().to_string() != "idle" || *self.rebooting() {
             return false;
@@ -794,6 +815,13 @@ impl qobject::Backend {
             );
             return false;
         }
+        let apps = match view::parse_apps(&apps.to_string()) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("atlas-installer: refusing to install: {e}");
+                return false;
+            }
+        };
         self.as_mut().set_install_error(QString::default());
         self.as_mut().set_install_began(false);
         self.as_mut().set_progress(0.0);
@@ -824,7 +852,7 @@ impl qobject::Backend {
                 async {
                     let r = match &flags {
                         Some(f) => demo::install(f, progress).await,
-                        None => helper::install(args, progress).await,
+                        None => helper::install(args, apps, progress).await,
                     };
                     match r {
                         // Install succeeded even if its answer can't be

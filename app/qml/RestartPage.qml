@@ -6,7 +6,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import Atlas.Ui
 
-// Step 7: done. Restart, plus the NVIDIA key steps when the helper queued
+// Step 8: done. Restart, plus the NVIDIA key steps when the helper queued
 // the key, and anything that went wrong without failing the install.
 InstallerPage {
     id: page

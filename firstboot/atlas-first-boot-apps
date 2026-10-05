@@ -1,0 +1,519 @@
+#!/usr/bin/python3
+"""Install the apps chosen in the AtlasOS installer, at the first start.
+
+  system  (root, once)       flatpak entries, system-wide from Flathub
+  user    (each account)     mise and mise tools, toolbox packages
+
+The record is /var/lib/atlasos/first-boot-apps.json, written by the installer.
+Its ids are only ever looked up in the catalog: nothing in it is executed or
+used as a URL. See firstboot/README.md.
+"""
+import hashlib
+import json
+import os
+import platform
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+# Pinned mise release (linux-x64 binary) and its SHA-256 from the release's
+# SHASUMS256.txt. Update both together.
+MISE_VERSION = "v2026.10.3"
+MISE_URL = ("https://github.com/jdx/mise/releases/download/%s/mise-%s-linux-x64"
+            % (MISE_VERSION, MISE_VERSION))
+MISE_SHA256 = "8d48bc510b7d844fad0bc7156c0855c2a1e7230c51e498a7f6b63b021f8b57c5"
+FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
+
+RECORD = Path("/var/lib/atlasos/first-boot-apps.json")
+STATUS = Path("/var/lib/atlasos/first-boot-apps.status")
+CATALOG = Path("/usr/share/atlasos/first-boot-apps.json")
+OS_RELEASE = Path("/etc/os-release")
+STATE_DIR = Path.home() / ".local/state/atlasos"
+BIN_DIR = Path.home() / ".local/bin"
+RUNTIME_DIR = Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get("XDG_RUNTIME_DIR") else None
+REQUIRE_ROOT = True    # system mode checks; the tests turn these off by patching
+CHECK_OWNER = True     # the record must be root-owned and not group/world-writable
+EX_PERMANENT = 78      # failure that retrying cannot fix; units list it in RestartPreventExitStatus
+STALE_RUNNING = 7200   # a "running" status older than this (seconds) is a dead run
+
+MAX_JSON = 1 << 20
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+FLATPAK_RE = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_-]+)+$")
+PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+TOOL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+BACKOFF_START, BACKOFF_CAP, ATTEMPTS = 30, 1800, 10
+
+
+class Failed(Exception):
+    """A failure with a reason in plain words. retry=False means retrying cannot help."""
+
+    def __init__(self, reason, retry=True):
+        super().__init__(reason)
+        self.reason = reason
+        self.retry = retry
+
+
+def log(msg):
+    print("atlas-first-boot-apps: " + msg, file=sys.stderr, flush=True)
+
+
+def read_json(path, kind):
+    """Read JSON of the expected type (dict or list), bounded in size."""
+    with open(path, "rb") as f:
+        data = f.read(MAX_JSON + 1)
+    if len(data) > MAX_JSON:
+        raise ValueError("file too large")
+    obj = json.loads(data)
+    if not isinstance(obj, kind):
+        raise ValueError("unexpected JSON type")
+    return obj
+
+
+def write_atomic(path, text, mode=0o644):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.rename(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    dfd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+def load_catalog():
+    try:
+        entries = read_json(CATALOG, list)
+    except (OSError, ValueError) as e:
+        log("cannot read the catalog %s: %s" % (CATALOG, e))
+        raise Failed("The app list for this version of AtlasOS is missing.", retry=False)
+    cat = {}
+    for e in entries:
+        if isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("install"), str):
+            cat[e["id"]] = e["install"]
+    return cat
+
+
+def load_record(check_owner=False):
+    """Return the record's ids, None when there is no record. Raises Failed (permanent)
+    when the record is damaged, the wrong version, or not owned by root."""
+    try:
+        st = RECORD.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise Failed("The saved app list cannot be read (%s)." % e.strerror, retry=False)
+    if check_owner and CHECK_OWNER and (st.st_uid != 0 or st.st_mode & 0o022):
+        raise Failed("The saved app list is not owned by the system, so it was ignored.", retry=False)
+    try:
+        rec = read_json(RECORD, dict)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        log("cannot read %s: %s" % (RECORD, e))
+        raise Failed("The saved app list is damaged.", retry=False)
+    if rec.get("version") != 1 or not isinstance(rec.get("apps"), list):
+        raise Failed("The saved app list is from an unknown version.", retry=False)
+    ids = []
+    for a in rec["apps"]:
+        if isinstance(a, str) and ID_RE.match(a):
+            if a not in ids:
+                ids.append(a)
+        else:
+            log("ignoring an invalid app id in the record")
+    return ids
+
+
+def classify(ids, catalog):
+    """Return ([(id, kind, arg)], [unknown ids]). Nothing is executed from the record."""
+    out, unknown = [], []
+    for i in ids:
+        install = catalog.get(i)
+        if install is None:
+            log("app id %r is not in this version's catalog" % i)
+            unknown.append(i)
+            continue
+        kind, _, arg = install.partition(":")
+        if kind == "flatpak" and FLATPAK_RE.match(arg):
+            out.append((i, "flatpak", arg))
+        elif kind == "mise" and not arg:
+            out.append((i, "mise", ""))
+        elif kind == "mise" and TOOL_RE.match(arg):
+            out.append((i, "mise-tool", arg))
+        elif kind == "toolbox" and arg.split() and all(PKG_RE.match(p) for p in arg.split()):
+            out.append((i, "toolbox", arg))
+        else:
+            log("catalog entry %r has an install value that is not understood" % i)
+            unknown.append(i)
+    return out, unknown
+
+
+def run(cmd, timeout):
+    """Run an argument list. Returns (returncode, output tail); timeout gives -1, missing -2."""
+    try:
+        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return -1, "timed out after %d s" % timeout
+    except OSError as e:
+        return -2, "%s: %s" % (cmd[0], e)
+    return p.returncode, p.stdout.decode("utf-8", "replace").strip()[-2000:]
+
+
+def check(cmd, timeout, what):
+    rc, out = run(cmd, timeout)
+    if rc != 0:
+        log("%s failed (%s): %s" % (what, rc, out))
+        if rc == -2:
+            raise Failed("%s is not available on this system." % cmd[0], retry=False)
+        if rc == -1:
+            raise Failed("%s took too long." % what)
+        raise Failed("%s did not finish. Check your internet connection." % what)
+    return out
+
+
+def retry(fn):
+    delay = BACKOFF_START
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            return fn()
+        except Failed as e:
+            if not e.retry or attempt == ATTEMPTS:
+                raise
+            log("%s Trying again in %d s." % (e.reason, delay))
+            time.sleep(delay)
+            delay = min(delay * 2, BACKOFF_CAP)
+
+
+# ---------------------------------------------------------------- system
+
+def write_status(state, message, apps, failed=(), unknown=(), permanent=False):
+    new = {"state": state, "message": message, "apps": list(apps), "failed": list(failed),
+           "unknown": list(unknown), "permanent": permanent}
+    if state != "running":  # an unchanged result keeps its stamp, so it is shown only once
+        try:
+            old = read_json(STATUS, dict)
+            if {k: old.get(k) for k in new} == new:
+                return
+        except (OSError, ValueError):
+            pass
+    new["updated"] = int(time.time())
+    write_atomic(STATUS, json.dumps(new) + "\n")
+
+
+def save_record(ids):
+    if ids:
+        write_atomic(RECORD, json.dumps({"version": 1, "apps": ids}) + "\n")
+    else:
+        os.unlink(RECORD)
+
+
+def refuse_record(reason):
+    """A record that can never work: set it aside, say so, and do not retry."""
+    bad = RECORD.with_name(RECORD.name + ".bad")
+    try:
+        os.rename(RECORD, bad)
+    except OSError as e:
+        log("cannot move %s aside: %s" % (RECORD, e))
+    try:
+        write_status("failed", reason, [], permanent=True)
+    except OSError as e:
+        log("cannot write status: %s" % e)
+    return EX_PERMANENT
+
+
+def system_mode():
+    if REQUIRE_ROOT and os.geteuid() != 0:
+        log("system mode needs root")
+        return EX_PERMANENT
+    try:
+        ids = load_record(check_owner=True)
+    except Failed as e:
+        log(e.reason)
+        return refuse_record(e.reason)
+    if ids is None:
+        return 0
+    try:
+        entries, unknown = classify(ids, load_catalog())
+    except Failed as e:
+        try:
+            write_status("failed", e.reason, [], permanent=True)
+        except OSError as we:
+            log("cannot write status: %s" % we)
+        return EX_PERMANENT
+    flat = [(i, a) for i, k, a in entries if k == "flatpak"]
+    names = [i for i, _ in flat]
+    remaining = list(ids)
+    failed, reason, permanent = [], "", False
+    if flat:
+        write_status("running", "Installing apps", names)
+        try:
+            check(["flatpak", "remote-add", "--if-not-exists", "--system", "flathub", FLATHUB_REPO],
+                  300, "Adding Flathub")
+        except Failed as e:
+            failed, reason, permanent = list(names), e.reason, not e.retry
+        else:
+            for n, (i, app) in enumerate(flat):
+                try:
+                    check(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub", app],
+                          7200, "Installing %s from Flathub" % i)
+                except Failed as e:
+                    reason, permanent = e.reason, permanent or not e.retry
+                    if not e.retry:  # nothing else can work either
+                        failed += names[n:]
+                        break
+                    failed.append(i)
+                else:
+                    remaining.remove(i)
+                    save_record(remaining)
+    if not remaining:
+        if os.path.exists(RECORD):
+            save_record([])
+    elif remaining != ids:
+        save_record(remaining)
+    if failed:
+        write_status("failed", reason, names, failed, unknown, permanent)
+    elif unknown:
+        write_status("partial", "Some apps aren't available in this version.", names, [], unknown)
+    elif flat:
+        write_status("done", "Apps installed", names)
+    return (EX_PERMANENT if permanent else 1) if failed else 0
+
+
+# ---------------------------------------------------------------- user
+
+def gv(text):
+    """A string as quoted GVariant text."""
+    text = "".join(c if c.isprintable() else " " for c in text)
+    return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def notify(summary, body=""):
+    """Best effort desktop notification; never raises."""
+    run(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications",
+         "--object-path", "/org/freedesktop/Notifications",
+         "--method", "org.freedesktop.Notifications.Notify",
+         "'Atlas'", "0", "''", gv(summary), gv(body), "[]", "{}", "8000"], 15)
+
+
+def once_per_boot(name):
+    """True the first time per boot (the marker lives in the runtime dir)."""
+    if RUNTIME_DIR is None:
+        return True
+    try:
+        fd = os.open(RUNTIME_DIR / ("atlas-first-boot-apps." + name),
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
+    os.close(fd)
+    return True
+
+
+def start_notice():
+    if once_per_boot("started"):
+        notify("Adding your apps\u2026", "This runs in the background.")
+
+
+def read_lines(path):
+    try:
+        return set(Path(path).read_text().split())
+    except OSError:
+        return set()
+
+
+def add_line(path, line):
+    write_atomic(path, "\n".join(sorted(read_lines(path) | {line})) + "\n", 0o600)
+
+
+def failed_mark(i):
+    return "failed:%s@%s" % (i, MISE_VERSION)  # a new pinned version tries again
+
+
+def install_mise():
+    dest = BIN_DIR / "mise"
+    if dest.is_file() and os.access(dest, os.X_OK):
+        return dest
+    if platform.machine() != "x86_64":
+        raise Failed("Developer tools are only available on 64-bit Intel and AMD computers.",
+                     retry=False)
+    start_notice()
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=BIN_DIR, prefix=".mise.")
+    os.close(fd)
+    try:
+        check(["curl", "--fail", "--location", "--silent", "--show-error", "--proto", "=https",
+               "--tlsv1.2", "--connect-timeout", "30", "--max-time", "1200",
+               "--max-filesize", "400000000", "-o", tmp, MISE_URL], 1300, "Downloading mise")
+        h = hashlib.sha256()
+        with open(tmp, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != MISE_SHA256:
+            log("mise checksum mismatch: got %s" % h.hexdigest())
+            raise Failed("The mise download did not match its checksum, so it was not installed.",
+                         retry=False)
+        os.chmod(tmp, 0o755)
+        os.rename(tmp, dest)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    return dest
+
+
+def toolbox_name():
+    try:
+        for line in OS_RELEASE.read_text().splitlines():
+            k, _, v = line.partition("=")
+            if k == "VERSION_ID" and re.fullmatch(r"[0-9]+", v.strip("\"'")):
+                return "fedora-toolbox-" + v.strip("\"'")
+    except OSError:
+        pass
+    raise Failed("Could not tell which toolbox to use.", retry=False)
+
+
+def toolbox_exists(name):
+    rc, out = run(["toolbox", "list", "--containers"], 60)
+    return rc == 0 and any(name in line.split() for line in out.splitlines()[1:])
+
+
+def do_mise(tools):
+    mise = retry(install_mise)
+    if tools:
+        start_notice()
+        retry(lambda: check([str(mise), "use", "-g"] + tools, 1800, "Installing developer tools"))
+
+
+def do_toolbox(pkgs):
+    name = toolbox_name()
+
+    def step():
+        start_notice()
+        if not toolbox_exists(name):
+            check(["toolbox", "create", "-y", "-c", name], 3600, "Creating the toolbox")
+        check(["toolbox", "run", "-c", name, "sudo", "dnf", "install", "-y"] + pkgs, 3600,
+              "Installing toolbox packages")
+    retry(step)
+
+
+def user_mode():
+    try:
+        ids = load_record()
+    except Failed as e:
+        log(e.reason)  # system mode sets a bad record aside and reports it
+        ids = None
+    if ids:
+        try:
+            entries, _ = classify(ids, load_catalog())
+        except Failed as e:
+            log(e.reason)
+            return 0
+        seen = read_lines(STATE_DIR / "first-boot-apps.done")
+        todo = [e for e in entries if e[1] != "flatpak" and e[0] not in seen
+                and failed_mark(e[0]) not in seen]
+        if todo:
+            return do_user_work(todo)
+    report_flatpak()
+    return 0
+
+
+def do_user_work(todo):
+    done = STATE_DIR / "first-boot-apps.done"
+    transient, permanent = [], []
+
+    def group(items, fn):
+        if not items:
+            return
+        try:
+            fn()
+        except Failed as e:
+            if e.retry:
+                transient.append(e.reason)
+            else:
+                permanent.append(e.reason)
+                for i in items:
+                    add_line(done, failed_mark(i))
+        else:
+            for i in items:
+                add_line(done, i)
+
+    mise_ids = [i for i, k, _ in todo if k in ("mise", "mise-tool")]
+    tools = [a for _, k, a in todo if k == "mise-tool"]
+    pk_ids = [i for i, k, _ in todo if k == "toolbox"]
+    pkgs = [p for _, k, a in todo if k == "toolbox" for p in a.split()]
+    group(mise_ids, lambda: do_mise(tools))
+    group(pk_ids, lambda: do_toolbox(pkgs))
+    if transient or permanent:
+        if once_per_boot("failed"):
+            notify("Some apps could not be added",
+                   " ".join(transient + permanent) + (" It will try again." if transient else ""))
+    else:
+        notify("Your apps are ready", "Developer tools are installed.")
+    report_flatpak()
+    return 1 if transient else 0
+
+
+def report_flatpak():
+    """Tell the user how the system-wide part went, once per outcome."""
+    seen = STATE_DIR / "first-boot-apps.notified"
+    for _ in range(60):  # wait up to about 30 minutes for a running install
+        try:
+            st = read_json(STATUS, dict)
+        except (OSError, ValueError):
+            return
+        if st.get("state") != "running":
+            break
+        updated = st.get("updated")
+        if not isinstance(updated, (int, float)) or time.time() - updated > STALE_RUNNING:
+            return  # a run that died
+        time.sleep(30)
+    else:
+        return
+    state, stamp = st.get("state"), "%s:%s" % (st.get("state"), st.get("updated"))
+    if state not in ("done", "failed", "partial") or stamp in read_lines(seen):
+        return
+    msg = st.get("message") if isinstance(st.get("message"), str) else "Something went wrong."
+    if state == "done":
+        notify("Your apps are ready", "Apps from Flathub are installed.")
+    elif state == "partial":
+        notify("Some apps could not be added", msg[:200])
+    else:
+        notify("Some apps could not be added",
+               msg[:200] + ("" if st.get("permanent") is True else " It will try again."))
+    add_line(seen, stamp)
+
+
+def main(argv):
+    if len(argv) != 2 or argv[1] not in ("system", "user"):
+        print("usage: atlas-first-boot-apps system|user", file=sys.stderr)
+        return 2
+    try:
+        return system_mode() if argv[1] == "system" else user_mode()
+    except Failed as e:
+        log(e.reason)
+        return 1
+    except OSError as e:
+        log("error: %s" % e)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

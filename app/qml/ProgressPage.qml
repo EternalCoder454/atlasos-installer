@@ -4,7 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import Atlas.Ui
 
-// Step 6: the install. No cancel: once the disk is being changed, stopping
+// Step 7: the install. No cancel: once the disk is being changed, stopping
 // halfway would leave it worse off. On failure, what happened and what next.
 InstallerPage {
     id: page

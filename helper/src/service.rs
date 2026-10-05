@@ -499,6 +499,7 @@ impl Service {
         wifi_uuid: String,
         encryption: String,
         password: String,
+        apps: Vec<String>,
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &zbus::Connection,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
@@ -523,6 +524,7 @@ impl Service {
             &encryption,
             password.as_str(),
         )
+        .and_then(|r| r.with_apps(&apps))
         .map_err(HelperError::InvalidArgument);
         // req carries its own copy: wipe this one now, not after the install.
         // Not wiped, by design: the outcome (recovery key) stays in Status so
