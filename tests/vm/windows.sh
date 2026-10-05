@@ -47,6 +47,18 @@ sleep 1
 virsh send-key "$dom" KEY_ENTER >/dev/null
 
 echo ">> Installing Windows; waiting for the VM to power off"
-while [ "$(virsh domstate "$dom")" != "shut off" ]; do sleep 30; done
+# About 20 minutes normally. Past WIN_TIMEOUT seconds Setup has hung: stop
+# the VM and remove the half-made base, so no test runs on it.
+deadline=$((SECONDS + ${WIN_TIMEOUT:-5400}))
+while [ "$(virsh domstate "$dom")" != "shut off" ]; do
+	if [ "$SECONDS" -ge "$deadline" ]; then
+		echo "windows.sh: Setup still running after ${WIN_TIMEOUT:-5400} s; stopping it" >&2
+		virsh destroy "$dom" >/dev/null 2>&1 || true
+		virsh undefine "$dom" --nvram --tpm >/dev/null 2>&1 || true
+		rm -f "$base"
+		exit 1
+	fi
+	sleep 30
+done
 virsh undefine "$dom" --nvram --tpm >/dev/null
 echo ">> Wrote $base"

@@ -4,7 +4,9 @@
 # STEP is a step key (welcome, keyboard, wifi, disk, review, progress,
 # restart), FLAGS the demo flags (see src/demo.rs), WAIT seconds before the
 # shot (default 3). Set SCALE=1.5 to match a 1.5x desktop, and ATLAS=1 for
-# the AtlasOS colours and font (IBM Plex Sans) instead of Breeze's.
+# the AtlasOS colours and font (IBM Plex Sans) instead of Breeze's. A run
+# gives up after SHOT_TIMEOUT seconds (default 300), and after 60 s with no
+# installer window.
 set -euo pipefail
 
 out=${1:?usage: screenshot.sh OUT.png [STEP] [FLAGS] [light|dark] [WAIT]}
@@ -48,7 +50,12 @@ set -e
 "$bin" &
 app=\$!
 sleep "$wait"
-w=\$(xdotool search --sync --onlyvisible --name "Install AtlasOS" | head -1)
+w=\$(timeout 60 xdotool search --sync --onlyvisible --name "Install AtlasOS" | head -1)
+if [ -z "\$w" ]; then
+	echo "screenshot.sh: no installer window after 60 s" >&2
+	kill \$app 2>/dev/null || true
+	exit 1
+fi
 # No window manager: focus it by hand, or Qt draws the inactive colours.
 xdotool windowfocus "\$w"
 sleep 0.5
@@ -62,4 +69,5 @@ env XDG_CONFIG_HOME="$tmp/config" XDG_DATA_HOME="$tmp/data" \
     XDG_CACHE_HOME="$tmp/cache" XDG_RUNTIME_DIR="$tmp/runtime" \
     QT_QPA_PLATFORM=xcb QT_SCALE_FACTOR="${SCALE:-1}" \
     ATLAS_INSTALLER_DEMO="$flags" ATLAS_INSTALLER_DEMO_PAGE="$step" \
+    timeout -k 10 "${SHOT_TIMEOUT:-300}" \
     dbus-run-session -- xvfb-run -a -s "-screen 0 2560x1600x24" "$tmp/run.sh"
