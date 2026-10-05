@@ -24,6 +24,7 @@ pub mod bin {
     pub const MKFS_VFAT: &str = "/usr/bin/mkfs.vfat";
     pub const MOKUTIL: &str = "/usr/bin/mokutil";
     pub const MOUNT: &str = "/usr/bin/mount";
+    pub const PODMAN: &str = "/usr/bin/podman";
     pub const SETFILES: &str = "/usr/bin/setfiles";
     pub const SFDISK: &str = "/usr/bin/sfdisk";
     pub const SYSTEMCTL: &str = "/usr/bin/systemctl";

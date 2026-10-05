@@ -2,12 +2,13 @@
 //! format, run bootc, write the settings, fix the boot entry, queue the
 //! NVIDIA key. The decisions are in installer-core; this runs them.
 
+use std::collections::HashMap;
 use std::fs;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use installer_core::crypt::{self, Encryption};
 use installer_core::disks::{self, Probe};
@@ -551,6 +552,173 @@ fn mkfs(role: Role, node: &str) -> Cmd {
         Role::Root => Cmd::new(bin::MKFS_BTRFS, ["-q", "-f", "-L", "atlasos", node]),
     }
     .timeout(15 * MINUTE)
+}
+
+/// The image's size in containers storage, uncompressed: what the image
+/// proxy hands bootc during the import. `None` if podman can't say; the
+/// copy then moves the bar by time.
+fn image_bytes(r: &dyn Runner, image: &str) -> Option<u64> {
+    let cmd = Cmd::new(
+        bin::PODMAN,
+        ["image", "inspect", "--format", "{{.Size}}", image],
+    )
+    .timeout(MINUTE);
+    let out = run(r, cmd).ok()?;
+    out.stdout.trim().parse().ok().filter(|n| *n > 0)
+}
+
+/// How often the copy is measured.
+const COPY_SAMPLE: Duration = Duration::from_secs(2);
+/// How often the log gets a line about the copy.
+const COPY_NOTE: Duration = Duration::from_secs(30);
+/// Where ostree keeps one ref per imported layer, in the new system.
+const BLOB_REFS: &str = "ostree/repo/refs/heads/ostree/container/blob";
+/// How many times the image proxy writes each byte it hands bootc.
+const SPOOLED: u64 = 2;
+
+/// Counts what the image proxy (`skopeo experimental-image-proxy`, which
+/// bootc starts) has handed bootc: the layers, uncompressed, as they import.
+/// bootc has no progress output of its own for this.
+///
+/// The proxy writes each layer twice: from containers-storage into a
+/// temporary file, then from that file to bootc (containers/image's
+/// `storageImageSource.GetBlob`, to hold the storage lock briefly). So the
+/// bytes it has written are [`SPOOLED`] times what bootc has had.
+///
+/// Only processes in the process group of a bootc that is the helper's own
+/// child count (the runner starts bootc as a group leader). The live
+/// session's user can name a process anything, but can't join that group,
+/// which is in the helper's session.
+struct CopyMeter {
+    proc_dir: PathBuf,
+    /// The helper's pid: bootc's parent.
+    parent: u32,
+    /// Bytes written by each proxy seen, by pid and start time (pids are
+    /// reused): one that has exited keeps its last count.
+    seen: HashMap<(u32, u64), u64>,
+}
+
+/// The fields of /proc/<pid>/stat after "pid (comm)": comm may hold spaces
+/// and ")", so they start after the last ")".
+fn stat_fields(stat: &str) -> Option<Vec<&str>> {
+    Some(stat.rsplit_once(')')?.1.split_whitespace().collect())
+}
+
+impl CopyMeter {
+    fn new(proc_dir: PathBuf, parent: u32) -> CopyMeter {
+        CopyMeter {
+            proc_dir,
+            parent,
+            seen: HashMap::new(),
+        }
+    }
+
+    /// Bytes handed to bootc so far, by all of its proxies.
+    fn sample(&mut self) -> u64 {
+        if let Ok(dir) = fs::read_dir(&self.proc_dir) {
+            for e in dir.flatten() {
+                let Some(pid) = e.file_name().to_str().and_then(|n| n.parse().ok()) else {
+                    continue;
+                };
+                if let Some((start, n)) = self.proxy_written(pid) {
+                    let v = self.seen.entry((pid, start)).or_insert(0);
+                    *v = (*v).max(n);
+                }
+            }
+        }
+        self.seen.values().fold(0u64, |a, n| a.saturating_add(*n)) / SPOOLED
+    }
+
+    fn read(&self, pid: u32, file: &str) -> Option<String> {
+        fs::read_to_string(self.proc_dir.join(pid.to_string()).join(file)).ok()
+    }
+
+    /// The start time and `wchar` of `pid`, if it is one of bootc's image
+    /// proxies.
+    fn proxy_written(&self, pid: u32) -> Option<(u64, u64)> {
+        if self.read(pid, "comm")?.trim_end() != "skopeo" {
+            return None;
+        }
+        // state, ppid, pgrp, ..., starttime (field 22 of stat)
+        let stat = self.read(pid, "stat")?;
+        let f = stat_fields(&stat)?;
+        let pgrp: u32 = f.get(2)?.parse().ok()?;
+        let start: u64 = f.get(19)?.parse().ok()?;
+        let leader = self.read(pgrp, "stat")?;
+        let lf = stat_fields(&leader)?;
+        if lf.get(1)?.parse::<u32>().ok()? != self.parent
+            || lf.get(2)?.parse::<u32>().ok()? != pgrp
+            || self.read(pgrp, "comm")?.trim_end() != "bootc"
+        {
+            return None;
+        }
+        // only now the command line, and no more of it than needed
+        let mut cmdline = Vec::new();
+        fs::File::open(self.proc_dir.join(pid.to_string()).join("cmdline"))
+            .ok()?
+            .take(4096)
+            .read_to_end(&mut cmdline)
+            .ok()?;
+        if !cmdline
+            .split(|b| *b == 0)
+            .any(|a| a == b"experimental-image-proxy")
+        {
+            return None;
+        }
+        let written = self
+            .read(pid, "io")?
+            .lines()
+            .find_map(|l| l.strip_prefix("wchar:"))?
+            .trim()
+            .parse()
+            .ok()?;
+        Some((start, written))
+    }
+}
+
+/// The layers imported so far: one ref each in the new system.
+fn layers_imported(refs: &Path) -> u64 {
+    fs::read_dir(refs).map_or(0, |d| d.count() as u64)
+}
+
+/// A line in the install log every [`COPY_NOTE`] while the layers import,
+/// so a slow copy can be read from the log alone.
+#[derive(Default)]
+struct CopyLog {
+    /// When the last line was written, and the byte count then.
+    last: Option<(Duration, u64)>,
+}
+
+impl CopyLog {
+    fn note(&mut self, log: &Log, bytes: Option<(u64, u64)>, layers: u64, now: Duration) {
+        let done = bytes.map_or(0, |(d, _)| d);
+        if done == 0 && layers == 0 {
+            return;
+        }
+        let Some((then, before)) = self.last else {
+            self.last = Some((now, done));
+            return;
+        };
+        if now.saturating_sub(then) < COPY_NOTE {
+            return;
+        }
+        let secs = now.saturating_sub(then).as_secs_f64();
+        log.note(&match bytes {
+            Some((done, total)) => format!(
+                "# copy: {} of {} ({:.0} %), {:.1} MB/s, {layers} layers imported",
+                gb(done),
+                gb(total),
+                100.0 * done as f64 / total as f64,
+                done.saturating_sub(before) as f64 / secs / 1e6,
+            ),
+            None => format!("# copy: {layers} layers imported"),
+        });
+        self.last = Some((now, done));
+    }
+}
+
+fn gb(bytes: u64) -> String {
+    format!("{:.2} GB", bytes as f64 / 1e9)
 }
 
 fn bootc(image: &str, target: &str, kargs: &[String]) -> Cmd {
@@ -1856,20 +2024,46 @@ fn execute(
 
     // bootc: the copy, the bootloader, then it trims and remounts read-only.
     emit(&Progress::at(Stage::Copy, 0.0));
+    let total = image_bytes(r, &p.image);
+    match total {
+        Some(t) => log.note(&format!("# the image is {} uncompressed", gb(t))),
+        None => log.note("# the image's size is unknown: the copy moves the bar by time"),
+    }
     let cmd = bootc(&p.image, target, &p.kargs);
     let started = Instant::now();
     let mut bp = BootcProgress::default();
+    let mut meter = CopyMeter::new(env.host("proc"), std::process::id());
+    let refs = env.target.join(BLOB_REFS);
+    let mut copy_log = CopyLog::default();
+    let mut next_sample = Duration::ZERO;
     r.run(&cmd, &mut |line| {
         let now = started.elapsed();
         let next = match line {
             Some(l) => bp.line(l, now),
-            None => bp.tick(now),
+            None => {
+                let mut moved = None;
+                if now >= next_sample {
+                    next_sample = now + COPY_SAMPLE;
+                    let bytes = total.map(|t| (meter.sample(), t));
+                    let layers = layers_imported(&refs);
+                    moved = bp.counted(bytes, layers, now);
+                    copy_log.note(log, bytes, layers, now);
+                }
+                moved.or_else(|| bp.tick(now))
+            }
         };
         if let Some(x) = next {
             emit(&x);
         }
     })?
     .check(&cmd)?;
+    if let Some(total) = total {
+        log.note(&format!(
+            "# the image proxy handed bootc {} of the expected {}",
+            gb(meter.sample()),
+            gb(total)
+        ));
+    }
 
     emit(&Progress::at(Stage::Settings, 0.0));
     run(r, Cmd::new(bin::MOUNT, ["-o", "remount,rw", target]))?;

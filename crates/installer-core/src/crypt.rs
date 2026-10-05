@@ -257,14 +257,7 @@ mod tests {
             assert!(validate_password(bad).is_err(), "{bad:?}");
         }
         assert!(validate_pin("1234").is_ok() && validate_pin(&"7".repeat(64)).is_ok());
-        for bad in [
-            "",
-            "123",
-            &"7".repeat(65),
-            "12345é",
-            "1234\n56",
-            "12345\t6",
-        ] {
+        for bad in ["", "123", &"7".repeat(65), "12345é", "1234\n56", "12345\t6"] {
             assert!(validate_pin(bad).is_err(), "{bad:?}");
         }
     }

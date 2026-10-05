@@ -138,6 +138,10 @@ pub mod qobject {
             encryption: &QString,
             password: &QString,
         ) -> bool;
+        /// Every second while installing: the time left counts down.
+        #[qinvokable]
+        #[cxx_name = "tickTimeLeft"]
+        fn tick_time_left(self: Pin<&mut Backend>);
         /// After a failed install: back to choosing a disk.
         #[qinvokable]
         #[cxx_name = "resetInstall"]
@@ -887,6 +891,23 @@ impl qobject::Backend {
             self.as_mut().set_progress_text(q(text));
         }
         self.as_mut().set_time_left(q(&left));
+    }
+
+    pub fn tick_time_left(mut self: Pin<&mut Self>) {
+        if self.install_state().to_string() != "running" {
+            return;
+        }
+        let Some(started) = self.rust().install_started else {
+            return;
+        };
+        let left = self
+            .as_mut()
+            .rust_mut()
+            .time_left_est
+            .tick(started.elapsed());
+        if *self.time_left() != q(&left) {
+            self.as_mut().set_time_left(q(&left));
+        }
     }
 
     pub fn reset_install(mut self: Pin<&mut Self>) {

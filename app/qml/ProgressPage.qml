@@ -22,6 +22,14 @@ InstallerPage {
     onPrimary: page.app.chooseDiskAgain()
     onSecondary: page.backend.reboot()
 
+    // The time left counts down between the helper's progress updates.
+    Timer {
+        interval: 1000
+        repeat: true
+        running: page.visible && page.backend.installState === "running"
+        onTriggered: page.backend.tickTimeLeft()
+    }
+
     ColumnLayout {
         anchors.centerIn: parent
         width: Math.min(page.contentWidth, Kirigami.Units.gridUnit * 26)
@@ -55,6 +63,8 @@ InstallerPage {
                 text: page.backend.timeLeft
                 opacity: 0.65
                 textFormat: Text.PlainText
+                // digits of one width: the countdown doesn't wobble
+                font.features: { "tnum": 1 }
             }
         }
         QQC2.Label {

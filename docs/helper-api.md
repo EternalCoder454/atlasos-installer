@@ -196,8 +196,19 @@ this path needs nothing from the medium.
 | `fraction` | Progress through the whole install, from 0 to 1. It never goes backwards. |
 | `text` | Text to show the user. |
 
-The copy stage moves when bootc prints a milestone line, and eases forward
-with time while the image layers import.
+The copy stage moves when bootc prints a milestone line. While the image
+layers import, it moves by what has been copied, the average of two shares:
+the bytes bootc's image proxy (`skopeo experimental-image-proxy`, in bootc's
+process group) has handed it, against the image's uncompressed size from
+`podman image inspect` (the proxy writes each layer twice, to a temporary
+file and then to bootc, so half of what it writes); and the layers imported
+(one ref each in the new system), against bootc's "layers needed". Either
+share alone does if the other can't be read, and with neither the bar eases
+forward with time. Once all is copied, the bar eases on while bootc merges
+and deploys the layers, which it does silently (about 3 minutes in the VM).
+The install log gets a line about the copy (amount, speed, layers) every 30
+seconds. While bootc runs, Progress is sent at least every 5 seconds, even
+when unchanged, so a UI can keep a time estimate current.
 
 ## Errors
 

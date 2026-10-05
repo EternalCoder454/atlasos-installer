@@ -360,6 +360,10 @@ impl Runner for Fake {
                 }
                 for l in BOOTC_OUT.lines() {
                     on_line(Some(l));
+                    if l.starts_with("layers already present") {
+                        // time passes during the import
+                        on_line(None);
+                    }
                 }
                 on_line(None);
                 let etc = self
@@ -513,7 +517,8 @@ impl World {
                     || c.name() == "sfdisk" && a.starts_with("--json")
                     || c.name() == "mount" && a.starts_with("-o ro,")
                     || c.name() == "umount" && a.ends_with("esp-probe")
-                    || c.name() == "mokutil" && a.starts_with("--test-key"))
+                    || c.name() == "mokutil" && a.starts_with("--test-key")
+                    || c.name() == "podman" && a.starts_with("image inspect"))
             })
             .map(|c| {
                 format!("{} {}", c.name(), c.args.join(" "))
@@ -2454,4 +2459,139 @@ fn the_service_unit_is_well_formed() {
         assert!(section || key_value, "malformed unit line: {line:?}");
     }
     assert!(text.lines().any(|l| l == "LimitMEMLOCK=infinity"));
+}
+
+/// A fake /proc entry: `comm`, `cmdline` (NUL-separated), `stat` with its
+/// parent, process group and start time, and `io` with `wchar`.
+fn fake_proc(root: &Path, pid: u32, comm: &str, args: &[&str], ppid: u32, pgrp: u32, wchar: u64) {
+    let d = root.join("proc").join(pid.to_string());
+    fs::create_dir_all(&d).unwrap();
+    fs::write(d.join("comm"), format!("{comm}\n")).unwrap();
+    let mut cmdline = args.join("\0");
+    cmdline.push('\0');
+    fs::write(d.join("cmdline"), cmdline).unwrap();
+    // state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt
+    // utime stime cutime cstime priority nice threads itrealvalue starttime
+    fs::write(
+        d.join("stat"),
+        format!(
+            "{pid} ({comm}) S {ppid} {pgrp} {pgrp} 0 -1 4194560 100 0 0 0 5 5 0 0 20 0 1 0 {} 1000\n",
+            1000 + pid
+        ),
+    )
+    .unwrap();
+    fs::write(
+        d.join("io"),
+        format!("rchar: 99\nwchar: {wchar}\nsyscr: 1\nsyscw: 1\n"),
+    )
+    .unwrap();
+}
+
+const PROXY: [&str; 4] = ["skopeo", "experimental-image-proxy", "--sockfd", "3"];
+
+#[test]
+fn the_copy_meter_counts_only_bootcs_image_proxies() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let helper = 77;
+    fake_proc(root, 4240, "bootc", &["bootc", "install"], helper, 4240, 0);
+    // the proxy writes each byte twice: to its temporary file, then to bootc
+    fake_proc(root, 4242, "skopeo", &PROXY, 4240, 4240, 1_000);
+    // in bootc's group, but not the proxy
+    fake_proc(root, 4243, "skopeo", &["skopeo", "copy"], 4240, 4240, 7_000);
+    // a "bootc" the helper didn't start, and its "proxy"
+    fake_proc(root, 4300, "bootc", &["bootc"], 1, 4300, 0);
+    fake_proc(root, 4301, "skopeo", &PROXY, 4300, 4300, 9_000);
+    // a process that names itself after the group without being in it
+    fake_proc(root, 4302, "x) S 77 4240", &PROXY, 4300, 4300, 9_000);
+    fs::create_dir_all(root.join("proc/self")).unwrap();
+    let mut m = CopyMeter::new(root.join("proc"), helper);
+    assert_eq!(m.sample(), 500);
+    // a second proxy; the first exits, and its count stays
+    fake_proc(root, 4250, "skopeo", &PROXY, 4240, 4240, 600);
+    fs::remove_dir_all(root.join("proc/4242")).unwrap();
+    assert_eq!(m.sample(), 800);
+    // a counted proxy's pid used again by a new proxy: both count
+    fs::remove_dir_all(root.join("proc/4250")).unwrap();
+    fake_proc(root, 4250, "skopeo", &PROXY, 4240, 4240, 100);
+    let stat = root.join("proc/4250/stat");
+    let s = fs::read_to_string(&stat)
+        .unwrap()
+        .replace(" 5250 ", " 9999 ");
+    fs::write(&stat, s).unwrap();
+    assert_eq!(m.sample(), 850);
+    // nothing readable: what was counted stays
+    let mut empty = CopyMeter::new(root.join("nowhere"), helper);
+    assert_eq!(empty.sample(), 0);
+}
+
+#[test]
+fn the_copy_moves_the_bar_by_the_bytes_copied() {
+    struct Sized(Fake);
+    impl Runner for Sized {
+        fn run(&self, cmd: &Cmd, on: &mut dyn FnMut(Option<&str>)) -> Result<Output, String> {
+            if cmd.name() == "podman" {
+                lock(&self.0.calls).push(cmd.clone());
+                return ok("1000000000\n");
+            }
+            self.0.run(cmd, on)
+        }
+    }
+    let w = World::new();
+    let helper = std::process::id();
+    fake_proc(&w.env.root, 4240, "bootc", &["bootc"], helper, 4240, 0);
+    // half the image, written twice
+    fake_proc(
+        &w.env.root,
+        4242,
+        "skopeo",
+        &PROXY,
+        4240,
+        4240,
+        1_000_000_000,
+    );
+    // and half of bootc's 128 layers
+    let refs = w.env.target.join(BLOB_REFS);
+    fs::create_dir_all(&refs).unwrap();
+    for i in 0..64 {
+        fs::write(refs.join(format!("sha256_3A_{i}")), "").unwrap();
+    }
+    let f = Sized(Fake::new(&w.env));
+    let mut seen = Vec::new();
+    install(&f, &w.env, &req("sda", "free-space"), &mut |p| {
+        seen.push(p.clone())
+    })
+    .unwrap();
+    let half = Progress::at(Stage::Copy, 0.06 + 0.84 * 0.5).fraction;
+    assert!(
+        seen.iter().any(|p| (p.fraction - half).abs() < 1e-9),
+        "{seen:?}"
+    );
+    assert!(seen.windows(2).all(|p| p[0].fraction <= p[1].fraction));
+    let calls = lock(&f.0.calls);
+    let podman = calls.iter().find(|c| c.name() == "podman").unwrap();
+    assert_eq!(
+        podman.args,
+        [
+            "image",
+            "inspect",
+            "--format",
+            "{{.Size}}",
+            "ghcr.io/eternalcoder454/atlasos:stable"
+        ]
+    );
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(log.contains("# the image is 1.00 GB uncompressed"), "{log}");
+    assert!(log.contains("# the image proxy handed bootc 0.50 GB of the expected 1.00 GB"));
+}
+
+#[test]
+fn without_the_image_size_the_copy_still_finishes() {
+    // the fake's podman prints nothing
+    let w = World::new();
+    let (out, seen) = w.install(&req("sda", "free-space"));
+    out.unwrap();
+    assert!(seen.windows(2).all(|p| p[0].fraction <= p[1].fraction));
+    let log = fs::read_to_string(w.env.log_path()).unwrap();
+    assert!(log.contains("# the image's size is unknown"), "{log}");
 }
