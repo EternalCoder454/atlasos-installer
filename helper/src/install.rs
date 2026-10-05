@@ -2203,11 +2203,15 @@ fn execute(
         Some(m) => format!("/dev/mapper/{m}"),
         None => node(Role::Root)?.to_string(),
     };
+    // No cache flushes while bootc copies: it commits the filesystem once a
+    // layer, and waiting on each flush took most of the copy (profiled
+    // 2026-10-05). The disk is flushed once after bootc, below; a power cut
+    // before that leaves only a failed install, which starts over anyway.
     run(
         r,
         Cmd::new(
             bin::MOUNT,
-            ["-o", "compress=zstd:1", root_dev.as_str(), target],
+            ["-o", "compress=zstd:1,nobarrier", root_dev.as_str(), target],
         ),
     )?;
     fs::create_dir_all(&boot_dir).map_err(|e| format!("cannot create /boot: {e}"))?;
@@ -2266,7 +2270,16 @@ fn execute(
     }
 
     emit(&Progress::at(Stage::Settings, 0.0));
-    run(r, Cmd::new(bin::MOUNT, ["-o", "remount,rw", target]))?;
+    run(
+        r,
+        Cmd::new(bin::MOUNT, ["-o", "remount,rw,barrier", target]),
+    )?;
+    // fsync on the device flushes its write cache: what bootc wrote is now
+    // on the disk itself. A slow disk can hold minutes of it.
+    run(
+        r,
+        Cmd::new(bin::SYNC, [root_dev.as_str()]).timeout(Duration::from_secs(900)),
+    )?;
     run(
         r,
         Cmd::new(bin::MOUNT, ["-o", "remount,rw", path_str(&boot_dir)?]),

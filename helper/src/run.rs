@@ -27,6 +27,7 @@ pub mod bin {
     pub const PODMAN: &str = "/usr/bin/podman";
     pub const SETFILES: &str = "/usr/bin/setfiles";
     pub const SFDISK: &str = "/usr/bin/sfdisk";
+    pub const SYNC: &str = "/usr/bin/sync";
     pub const SYSTEMCTL: &str = "/usr/bin/systemctl";
     pub const UDEVADM: &str = "/usr/bin/udevadm";
     pub const UMOUNT: &str = "/usr/bin/umount";

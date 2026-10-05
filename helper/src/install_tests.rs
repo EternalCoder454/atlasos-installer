@@ -568,12 +568,13 @@ fn free_space_beside_windows() {
             "mkfs.ext4 -q -F -L boot /dev/sda5",
             "wipefs --all --quiet /dev/sda6",
             "mkfs.btrfs -q -f -L atlasos /dev/sda6",
-            "mount -o compress=zstd:1 /dev/sda6 T",
+            "mount -o compress=zstd:1,nobarrier /dev/sda6 T",
             "mount /dev/sda5 T/boot",
             "mount /dev/sda1 T/boot/efi",
             "bootc install to-filesystem --source-imgref containers-storage:ghcr.io/eternalcoder454/atlasos:stable \
              --target-imgref ghcr.io/eternalcoder454/atlasos:stable --skip-fetch-check --karg rootflags=compress=zstd:1 T",
-            "mount -o remount,rw T",
+            "mount -o remount,rw,barrier T",
+            "sync /dev/sda6",
             "mount -o remount,rw T/boot",
             "setfiles -F -r T/ostree/deploy/default/deploy/abc123.0 \
              T/ostree/deploy/default/deploy/abc123.0/etc/selinux/targeted/contexts/files/file_contexts \
@@ -1447,11 +1448,13 @@ fn tpm_encryption_runs_these_commands() {
             "cryptsetup luksDump --dump-json-metadata /dev/sda6".into(),
             "cryptsetup open --test-passphrase --disable-external-tokens --key-file - /dev/sda6"
                 .into(),
-            "mount -o compress=zstd:1 /dev/mapper/luks-U T".into(),
+            "mount -o compress=zstd:1,nobarrier /dev/mapper/luks-U T".into(),
         ]
     );
     // the ESP and /boot stay plain, and the mapper is closed after the umount
     assert!(writes.contains(&"mkfs.ext4 -q -F -L boot /dev/sda5".to_string()));
+    // the flush after bootc goes through the mapper to the disk
+    assert!(writes.contains(&"sync /dev/mapper/luks-U".to_string()));
     let n = writes.len();
     assert_eq!(writes[n - 3], "umount --recursive T");
     assert_eq!(writes[n - 2], "umount --recursive /run/bootc/storage");
@@ -1547,7 +1550,7 @@ fn password_encryption_puts_the_password_on_stdin_only() {
             format!(
                 "cryptsetup open --test-passphrase --disable-external-tokens --key-file - {root}"
             ),
-            "mount -o compress=zstd:1 /dev/mapper/luks-U T".into(),
+            "mount -o compress=zstd:1,nobarrier /dev/mapper/luks-U T".into(),
         ]
     );
     assert_eq!(
@@ -2111,7 +2114,7 @@ fn tpm_with_a_pin_puts_the_pin_in_the_environment_only() {
             "cryptsetup luksDump --dump-json-metadata /dev/sda6".into(),
             "cryptsetup open --test-passphrase --disable-external-tokens --key-file - /dev/sda6"
                 .into(),
-            "mount -o compress=zstd:1 /dev/mapper/luks-U T".into(),
+            "mount -o compress=zstd:1,nobarrier /dev/mapper/luks-U T".into(),
         ]
     );
     assert!(out.recovery_key.is_some());
