@@ -26,11 +26,18 @@ Polkit checks every call, using the caller's bus name as the subject.
 Polkit action: `net.eterneon.atlas.installer.list-disks`. An active local
 session is allowed without authentication.
 
-Returns JSON with `disks`, `hidden`, `tpm2` and `secure_boot`. `secure_boot` is
-a boolean: Secure Boot is on (the TPM binds the disk to PCR 7, which holds
-its state). `tpm2` is a boolean: a
-usable TPM 2.0 exists (a `/sys/class/tpm/tpm*` chip whose
-`tpm_version_major` is `2`, and `/dev/tpmrm0`). Each disk has these fields:
+Returns JSON with `disks`, `hidden`, `tpm2`, `secure_boot` and
+`chain_loaded`. `secure_boot` is a boolean: Secure Boot is on (the TPM binds
+the disk to PCR 7, which holds its state). `tpm2` is a boolean: a usable
+TPM 2.0 exists (a `/sys/class/tpm/tpm*` chip whose `tpm_version_major` is
+`2`, and `/dev/tpmrm0`). `chain_loaded` is `"ventoy"` when the live system
+was started from a Ventoy stick, `"iso-file"` when it was started from an
+ISO file through another boot loader's menu (mounted at
+`/run/initramfs/isoscan`), and `null` when the ISO's own boot loader started
+it. That other loader is measured into PCR 7 and the installed system's
+boot isn't, so a key sealed to PCR 7 now would never unseal: Install
+refuses `tpm` and `tpm-pin` while `chain_loaded` is set. Each disk has these
+fields:
 
 | Field | Meaning |
 |---|---|
@@ -76,7 +83,7 @@ refused.
 | `locale` | For example `de_DE.UTF-8`. |
 | `keymap` | `de`, or `de(nodeadkeys)` with a variant. |
 | `wifi_uuid` | A NetworkManager connection to copy into the new system, or an empty string. |
-| `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false. |
+| `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false, or set `chain_loaded`. |
 | `password` | For `password`: the disk password, 8 to 256 characters. For `tpm-pin`: the PIN, 4 to 64 characters. Printable ASCII only (space to `~`): the initramfs prompt can't reliably type anything else (keymaps, dead keys, normalisation). An empty string for `none` and `tpm`; anything else is refused. |
 
 Install probes the disks again and decides everything before it writes

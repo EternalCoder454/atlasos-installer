@@ -21,6 +21,7 @@
 //! | `finished` | The helper has finished installing: the UI starts on the Restart page (`mok`, `warn` and `cd` apply) |
 //! | `notpm` | This PC has no TPM 2.0: encryption needs a password |
 //! | `nosb` | Secure Boot is off on this PC (with a TPM, the PIN switch then starts on) |
+//! | `ventoy` | Started through Ventoy: the TPM can't be used, so encryption needs a password |
 //! | `pin` | The Disk page opens with the start-up PIN switched on (with a TPM) |
 //! | `encrypt` | The Disk page opens with "Encrypt this disk" turned on |
 //! | `cd` | Started from a disc, not a USB stick (the Restart page's wording) |
@@ -57,6 +58,7 @@ pub struct Flags {
     pub encrypt: bool,
     pub nosb: bool,
     pub pin: bool,
+    pub ventoy: bool,
 }
 
 /// `None` unless `ATLAS_INSTALLER_DEMO` is set (and not empty or `0`).
@@ -130,6 +132,7 @@ pub fn parse(v: &str) -> Option<Flags> {
             "encrypt" => f.encrypt = true,
             "nosb" => f.nosb = true,
             "pin" => f.pin = true,
+            "ventoy" => f.ventoy = true,
             _ => {}
         }
     }
@@ -145,6 +148,9 @@ pub async fn list_disks(f: &Flags) -> Result<String, helper::Error> {
     let mut list: serde_json::Value = serde_json::from_str(all).expect("fixture");
     list["tpm2"] = (!f.notpm).into();
     list["secure_boot"] = (!f.nosb).into();
+    if f.ventoy {
+        list["chain_loaded"] = "ventoy".into();
+    }
     if f.nodisks {
         list["disks"] = serde_json::json!([]);
         list["hidden"] = serde_json::json!([]);
@@ -405,6 +411,8 @@ mod tests {
         assert_eq!(tpm2("1").await, Some(true));
         assert_eq!(tpm2("notpm").await, Some(false));
         assert_eq!(tpm2("nodisks").await, Some(true));
+        let list = list_disks(&parse("ventoy").unwrap()).await.unwrap();
+        assert_eq!(crate::view::chain_loaded_of(&list), "ventoy");
         let list = list_disks(&parse("nosb").unwrap()).await.unwrap();
         assert!(crate::view::secure_boot_off(&list));
     }

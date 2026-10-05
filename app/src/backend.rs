@@ -37,8 +37,12 @@ pub mod qobject {
         #[qproperty(QString, wifi_uuid, cxx_name = "wifiUuid")]
         #[qproperty(bool, secure_boot, cxx_name = "secureBoot")]
         #[qproperty(bool, nvidia)]
-        /// This PC has a usable TPM 2.0 (from ListDisks).
+        /// This PC has a usable TPM 2.0 (from ListDisks), and the installer
+        /// can tie the disk to it (see chain_loaded).
         #[qproperty(bool, tpm2)]
+        /// The boot loader that started the installer when it wasn't the
+        /// ISO's own: "ventoy", "iso-file", or "".
+        #[qproperty(QString, chain_loaded, cxx_name = "chainLoaded")]
         /// ListDisks says Secure Boot is off on this PC.
         #[qproperty(bool, secure_boot_off, cxx_name = "secureBootOff")]
         /// Demo mode: open with the start-up PIN switched on.
@@ -298,6 +302,7 @@ pub struct BackendRust {
     secure_boot: bool,
     nvidia: bool,
     tpm2: bool,
+    chain_loaded: QString,
     secure_boot_off: bool,
     demo_pin: bool,
     demo_encrypt: bool,
@@ -346,6 +351,7 @@ impl Default for BackendRust {
             secure_boot: false,
             nvidia: false,
             tpm2: false,
+            chain_loaded: QString::default(),
             secure_boot_off: false,
             demo_pin: false,
             demo_encrypt: false,
@@ -537,8 +543,9 @@ impl qobject::Backend {
             let r = r.and_then(|json| {
                 let tpm2 = view::tpm2_of(&json);
                 let sb_off = view::secure_boot_off(&json);
+                let chain = view::chain_loaded_of(&json);
                 serde_json::from_str::<installer_core::disks::DiskList>(&json)
-                    .map(|l| (view::disk_rows(&l), tpm2, sb_off))
+                    .map(|l| (view::disk_rows(&l), tpm2, sb_off, chain))
                     .map_err(|e| {
                         helper_err(format!("The installer service gave a bad answer: {e}"))
                     })
@@ -556,11 +563,15 @@ impl qobject::Backend {
 
     fn apply_disks(
         mut self: Pin<&mut Self>,
-        r: Result<(Vec<view::DiskRow>, bool, bool), helper::Error>,
+        r: Result<(Vec<view::DiskRow>, bool, bool, String), helper::Error>,
     ) {
         match r {
-            Ok((rows, tpm2, sb_off)) => {
-                self.as_mut().set_tpm2(tpm2);
+            Ok((rows, tpm2, sb_off, chain)) => {
+                // started by another boot loader, the TPM would seal to it;
+                // without a chip, that is no reason to give
+                self.as_mut().set_tpm2(tpm2 && chain.is_empty());
+                self.as_mut()
+                    .set_chain_loaded(q(if tpm2 { chain.as_str() } else { "" }));
                 self.as_mut().set_secure_boot_off(sb_off);
                 let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into());
                 let quick = view::quick_pick(&rows)

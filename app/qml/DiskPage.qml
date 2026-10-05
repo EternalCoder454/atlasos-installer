@@ -211,7 +211,7 @@ InstallerPage {
                 SectionRow {
                     iconName: "lock"
                     title: qsTr("Encrypt this disk")
-                    subtitle: page.backend.tpm2 ? qsTr("AtlasOS unlocks the disk by itself when this PC starts. Your files stay unreadable if the disk is taken out of this PC, or if the PC is sold or recycled. You'll get a recovery key at the end.") : qsTr("This PC has no security chip (TPM 2.0), so you'd type a password every time it starts.")
+                    subtitle: page.backend.tpm2 ? qsTr("AtlasOS unlocks the disk by itself when this PC starts. Your files stay unreadable if the disk is taken out of this PC, or if the PC is sold or recycled. You'll get a recovery key at the end.") : page.backend.chainLoaded === "ventoy" ? qsTr("The installer was started through Ventoy, so AtlasOS can't use this PC's security chip to unlock the disk: you'd type a password every time it starts. To unlock without one, write the AtlasOS ISO straight to a USB stick and start from that.") : page.backend.chainLoaded !== "" ? qsTr("The installer was started from an ISO file through another boot menu, so AtlasOS can't use this PC's security chip to unlock the disk: you'd type a password every time it starts. To unlock without one, write the AtlasOS ISO straight to a USB stick and start from that.") : qsTr("This PC has no security chip (TPM 2.0), so you'd type a password every time it starts.")
                     showSwitch: true
                     switchChecked: page.app.encrypt
                     onSwitchToggled: checked => page.app.encryptChoice = checked ? "on" : "off"

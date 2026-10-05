@@ -74,10 +74,19 @@ theft of the whole PC is a concern, choose the PIN. Even the PIN is not a
 guarantee: a tampered `/boot` could capture it the next time you type it.
 
 A VM test showed that enrolling a MOK key changes PCR 14 only, not PCR 7. So
-anything signed by a key in the MOK list (the NVIDIA driver key, for example)
-also boots with the TPM unlocking the disk: the TPM trusts everything Secure
-Boot trusts, MOK keys included. For the same reason, enrolling the NVIDIA key
-does not make the first start ask for the recovery key.
+enrolling the NVIDIA key does not make the first start ask for the recovery
+key, and the NVIDIA modules it signs (checked by the kernel, not by shim)
+don't change PCR 7 either. A boot loader that shim checks with a MOK key is
+different: shim records that key in PCR 7.
+
+That is why the TPM can't be used when the installer is started through
+Ventoy, or from an ISO file through another boot menu: that boot loader is
+recorded in PCR 7 during the install, and the installed system's own boot
+never matches it, so every start would ask for the recovery key. The
+installer then offers a password instead (and the helper refuses the TPM).
+Write the ISO straight to a USB stick to use the TPM. The installer knows a
+Ventoy boot by Ventoy's `/dev/mapper/ventoy` (its normal mode); a Ventoy mode
+that copies the whole ISO into memory instead isn't recognised.
 
 ## Requirements
 

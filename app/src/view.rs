@@ -447,6 +447,16 @@ pub fn secure_boot_off(list_json: &str) -> bool {
         == Some(false)
 }
 
+/// The boot loader that started the installer when it wasn't the ISO's
+/// own, from ListDisks: "ventoy", "iso-file", or "". The TPM can't be used
+/// then (the helper refuses it).
+pub fn chain_loaded_of(list_json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(list_json)
+        .ok()
+        .and_then(|v| v["chain_loaded"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
 /// Whether ListDisks says this PC has a usable TPM 2.0.
 pub fn tpm2_of(list_json: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(list_json)
@@ -955,6 +965,10 @@ mod tests {
         assert!(!tpm2_of(r#"{"disks":[],"tpm2":false}"#));
         assert!(!tpm2_of(r#"{"disks":[]}"#));
         assert!(!tpm2_of("nope"));
+        assert_eq!(chain_loaded_of(r#"{"chain_loaded":"ventoy"}"#), "ventoy");
+        assert_eq!(chain_loaded_of(r#"{"chain_loaded":null}"#), "");
+        assert_eq!(chain_loaded_of(r#"{"disks":[]}"#), "");
+        assert_eq!(chain_loaded_of("nope"), "");
         assert!(secure_boot_off(r#"{"secure_boot":false}"#));
         assert!(!secure_boot_off(r#"{"secure_boot":true}"#));
         assert!(!secure_boot_off(r#"{"disks":[]}"#));

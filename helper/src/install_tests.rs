@@ -2645,3 +2645,32 @@ fn a_copy_in_at_the_first_look_still_gets_its_line() {
         "{text}"
     );
 }
+
+#[test]
+fn a_boot_through_ventoy_or_an_iso_file_refuses_the_tpm() {
+    let ventoy: &[u8] = b"/dev/mapper/ventoy /run/initramfs/live iso9660 ro 0 0\n";
+    let iso_file: &[u8] = b"/dev/sdb1 /run/initramfs/isoscan exfat ro 0 0\n\
+          /dev/loop0 /run/initramfs/live iso9660 ro 0 0\n";
+    for (mounts, loader, how) in [
+        (ventoy, "ventoy", "through Ventoy"),
+        (iso_file, "iso-file", "from an ISO file"),
+    ] {
+        let w = World::new().with_tpm();
+        w.put("proc/self/mounts", mounts);
+        let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
+        assert_eq!(v["chain_loaded"], loader);
+        assert_eq!(v["tpm2"], true, "the chip is there all the same");
+        for (enc, secret) in [("tpm", ""), ("tpm-pin", PIN)] {
+            let e = w
+                .install(&enc_req("sda", "free-space", enc, secret))
+                .0
+                .unwrap_err();
+            assert!(e.contains(how) && e.contains("Choose a password"), "{e}");
+            assert!(w.writes().is_empty(), "{:?}", w.writes());
+        }
+    }
+    // the ISO's own boot loader: nothing to say
+    let w = World::new().with_tpm();
+    let v = serde_json::to_value(list_disks(&w.fake, &w.env).unwrap()).unwrap();
+    assert_eq!(v["chain_loaded"], serde_json::Value::Null);
+}

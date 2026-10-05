@@ -280,6 +280,30 @@ pub fn boot_media(probe: &Probe) -> &'static str {
     }
 }
 
+/// Which other boot loader started the live system, if one did: `ventoy`
+/// (from a Ventoy stick) or `iso-file` (an ISO file booted from another boot
+/// loader's menu, which dmsquash-live mounts at [`ISOSCAN_MOUNT`]). That
+/// loader is measured into PCR 7, and AtlasOS's own boot isn't, so a TPM key
+/// sealed to PCR 7 now would never unseal on the installed system.
+pub fn chain_loaded(probe: &Probe, mounts: &str) -> Option<&'static str> {
+    let media = probe.lsblk.as_ref().and_then(|l| {
+        l.blockdevices
+            .iter()
+            .find(|d| holds_live_source(d, &probe.live_sources))
+    });
+    if media.is_some_and(|d| d.walk().iter().any(|x| is_ventoy(x)))
+        || probe.live_sources.iter().any(|s| s == "/dev/mapper/ventoy")
+    {
+        return Some("ventoy");
+    }
+    let iso_file = mounts.lines().any(|line| {
+        line.split_whitespace()
+            .nth(1)
+            .is_some_and(|dir| unescape(dir) == ISOSCAN_MOUNT)
+    });
+    iso_file.then_some("iso-file")
+}
+
 /// The plan for `mode` on `disk`, or why it isn't possible. Used both for
 /// listing and, after a fresh probe, by `Install`.
 pub fn plan_for(disk: &Device, probe: &Probe, mode: Mode) -> Result<Plan, Unavailable> {
@@ -591,6 +615,39 @@ mod tests {
         assert_eq!(boot_media(&ventoy("/dev/nvme0n1")), "", "an internal disk");
         assert_eq!(boot_media(&ventoy("/dev/nope")), "");
         assert_eq!(boot_media(&Probe::default()), "");
+    }
+
+    #[test]
+    fn a_live_system_another_loader_started_is_told_apart() {
+        let ventoy = |src: &str| Probe {
+            lsblk: Some(Lsblk::parse(VENTOY).unwrap()),
+            live_sources: vec![src.into()],
+            ..Default::default()
+        };
+        let live = "/dev/mapper/ventoy /run/initramfs/live iso9660 ro 0 0\n";
+        assert_eq!(
+            chain_loaded(&ventoy("/dev/mapper/ventoy"), live),
+            Some("ventoy")
+        );
+        assert_eq!(chain_loaded(&ventoy("/dev/dm-0"), ""), Some("ventoy"));
+        // without lsblk, by the device's name
+        let bare = Probe {
+            live_sources: vec!["/dev/mapper/ventoy".into()],
+            ..Default::default()
+        };
+        assert_eq!(chain_loaded(&bare, ""), Some("ventoy"));
+        // a Ventoy stick plugged in beside the real boot media: not it
+        assert_eq!(chain_loaded(&ventoy("/dev/nvme0n1"), ""), None);
+        // the ISO's own boot loader, from a stick or a CD
+        assert_eq!(chain_loaded(&win_probe(63 * MIB), ""), None);
+        assert_eq!(chain_loaded(&Probe::default(), ""), None);
+        // an ISO file from another boot loader's menu
+        let m = "/dev/sdb2 /run/initramfs/isoscan ext4 ro 0 0\n/dev/loop0 /run/initramfs/live iso9660 ro 0 0\n";
+        let iso = Probe {
+            live_sources: live_sources(m),
+            ..Default::default()
+        };
+        assert_eq!(chain_loaded(&iso, m), Some("iso-file"));
     }
 
     #[test]

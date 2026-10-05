@@ -224,6 +224,9 @@ pub struct Listing {
     pub tpm2: bool,
     /// Secure Boot is on (a TPM-only disk is then bound to its state).
     pub secure_boot: bool,
+    /// The boot loader that started the live system, when it wasn't the
+    /// ISO's own: `ventoy` or `iso-file`. The TPM can't be used then.
+    pub chain_loaded: Option<&'static str>,
 }
 
 /// A TPM 2.0 the system can use: the kernel lists a chip speaking spec
@@ -347,11 +350,18 @@ fn esp_info(r: &dyn Runner, env: &Env, p: &Device) -> Result<Option<EspInfo>, St
 
 /// `ListDisks`.
 pub fn list_disks(r: &dyn Runner, env: &Env) -> Result<Listing, String> {
+    let probe = probe(r, env)?;
     Ok(Listing {
-        disks: disks::list(&probe(r, env)?),
+        disks: disks::list(&probe),
         tpm2: tpm2_present(env),
         secure_boot: secure_boot_on(env),
+        chain_loaded: chain_loaded(env, &probe),
     })
+}
+
+fn chain_loaded(env: &Env, probe: &disks::Probe) -> Option<&'static str> {
+    let mounts = fs::read_to_string(env.host("proc/self/mounts")).unwrap_or_default();
+    disks::chain_loaded(probe, &mounts)
 }
 
 /// Everything decided before the first write.
@@ -431,6 +441,18 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
             "This PC has no usable security chip (TPM 2.0), so the disk can't be unlocked by it. Choose a password instead, or turn encryption off."
                 .into(),
         );
+    }
+    if req.encryption.uses_tpm()
+        && let Some(loader) = chain_loaded(env, &probe)
+    {
+        let how = if loader == "ventoy" {
+            "through Ventoy"
+        } else {
+            "from an ISO file, through another boot menu"
+        };
+        return Err(format!(
+            "The installer was started {how}, so the disk can't be tied to this PC's security chip: it would ask for the recovery key at every start. Choose a password instead, or start the installer from a USB stick the AtlasOS ISO was written to."
+        ));
     }
 
     if req.encryption != Encryption::None {
