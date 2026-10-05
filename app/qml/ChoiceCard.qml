@@ -20,7 +20,9 @@ FocusScope {
 
     Layout.fillWidth: true
     implicitHeight: col.implicitHeight + Kirigami.Units.gridUnit * 1.4
-    activeFocusOnTab: card.possible
+    // Kept while focused: Qt refuses to drop it then (a click elsewhere can
+    // make the focused card impossible); it goes once the focus moves on.
+    activeFocusOnTab: card.possible || card.activeFocus
     Accessible.role: Accessible.RadioButton
     Accessible.name: card.title
     Accessible.description: card.text

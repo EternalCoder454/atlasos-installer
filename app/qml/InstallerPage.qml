@@ -18,6 +18,9 @@ FocusScope {
     property bool footerVisible: true
     // A text button beside the pill ("Set Up Later"), or "".
     property string secondaryText
+    // The secondary action as a button rather than a link.
+    property bool secondaryFilled: false
+    property bool secondaryEnabled: true
     property alias header: headerSlot.data
     default property alias content: body.data
     // Lines stay readable: wider windows get more margin, not longer lines.
@@ -91,8 +94,14 @@ FocusScope {
                 Layout.fillWidth: true
             }
             TextButton {
-                visible: page.secondaryText.length > 0
+                visible: page.secondaryText.length > 0 && !page.secondaryFilled
                 text: page.secondaryText
+                onClicked: page.secondary()
+            }
+            SecondaryButton {
+                visible: page.secondaryText.length > 0 && page.secondaryFilled
+                text: page.secondaryText
+                enabled: page.secondaryEnabled
                 onClicked: page.secondary()
             }
             PrimaryButton {

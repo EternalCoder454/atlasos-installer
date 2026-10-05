@@ -131,7 +131,10 @@ Rectangle {
                     implicitHeight: Math.round(Kirigami.Units.gridUnit * 1.6)
                     text: step.modelData.title
                     hoverEnabled: step.clickable
-                    focusPolicy: step.clickable ? Qt.StrongFocus : Qt.NoFocus
+                    // Kept while focused: a clicked step becomes the current
+                    // one, and Qt refuses to drop the focus policy of the
+                    // focused item. It goes once the focus moves on.
+                    focusPolicy: step.clickable || step.activeFocus ? Qt.StrongFocus : Qt.NoFocus
                     Accessible.role: step.clickable ? Accessible.Button : Accessible.ListItem
                     Accessible.name: step.text
                     Accessible.selected: step.isCurrent

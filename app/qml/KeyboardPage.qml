@@ -39,13 +39,15 @@ InstallerPage {
     Component.onCompleted: {
         page.app.backend.applyKeymap(page.app.keymap);
         search.forceActiveFocus();
-        Qt.callLater(() => {
-            const i = page.filtered.findIndex(l => l.id === page.layoutId);
-            if (i >= 0) {
-                frame.currentIndex = i;
-                frame.positionAt(i);
-            }
-        });
+        Qt.callLater(page.showChosen);
+    }
+
+    function showChosen() {
+        const i = page.filtered.findIndex(l => l.id === page.layoutId);
+        if (i >= 0) {
+            frame.currentIndex = i;
+            frame.positionAt(i);
+        }
     }
 
     ColumnLayout {
@@ -57,6 +59,12 @@ InstallerPage {
         SearchField {
             id: search
             Layout.fillWidth: true
+            // Cleared (Escape, the clear button): back to the chosen row.
+            onQueryChanged: {
+                if (search.query.length === 0) {
+                    Qt.callLater(page.showChosen);
+                }
+            }
             placeholderText: qsTr("Search layouts")
             Keys.onDownPressed: frame.list.forceActiveFocus()
             onAccepted: {

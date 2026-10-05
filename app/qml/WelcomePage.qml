@@ -18,6 +18,10 @@ InstallerPage {
     backVisible: false
     primaryEnabled: page.app.language.length > 0
     onPrimary: page.app.next()
+    secondaryText: qsTr("Quick Install")
+    secondaryFilled: true
+    secondaryEnabled: page.app.quickReady && page.app.language.length > 0
+    onSecondary: page.app.quickInstall()
 
     // [{code, native, english}], sorted by the English name.
     readonly property var languages: {
@@ -46,13 +50,15 @@ InstallerPage {
 
     Component.onCompleted: {
         search.forceActiveFocus();
-        Qt.callLater(() => {
-            const i = page.filtered.findIndex(l => l.code === page.app.language);
-            if (i >= 0) {
-                frame.currentIndex = i;
-                frame.positionAt(i);
-            }
-        });
+        Qt.callLater(page.showChosen);
+    }
+
+    function showChosen() {
+        const i = page.filtered.findIndex(l => l.code === page.app.language);
+        if (i >= 0) {
+            frame.currentIndex = i;
+            frame.positionAt(i);
+        }
     }
 
     ColumnLayout {
@@ -64,6 +70,12 @@ InstallerPage {
         SearchField {
             id: search
             Layout.fillWidth: true
+            // Cleared (Escape, the clear button): back to the chosen row.
+            onQueryChanged: {
+                if (search.query.length === 0) {
+                    Qt.callLater(page.showChosen);
+                }
+            }
             placeholderText: qsTr("Search languages")
             Keys.onDownPressed: frame.list.forceActiveFocus()
             onAccepted: {

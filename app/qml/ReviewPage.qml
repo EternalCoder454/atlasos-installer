@@ -21,7 +21,7 @@ InstallerPage {
     readonly property var layouts: JSON.parse(page.app.backend.layoutsJson)
 
     title: qsTr("Ready to install?")
-    subtitle: qsTr("Check that everything looks right.")
+    subtitle: page.app.quick ? qsTr("Quick Install chose these for you. To change one, go back or pick a step on the left.") : qsTr("Check that everything looks right.")
     primaryText: page.losesData ? qsTr("Erase and Install") : qsTr("Install")
     primaryEnabled: page.disk !== null && page.app.mode.length > 0
     onPrimary: page.erase ? confirm.open() : page.app.startInstall()

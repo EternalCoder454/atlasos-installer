@@ -34,6 +34,8 @@ pub struct DiskRow {
     pub subtitle: String,
     pub icon: &'static str,
     pub usb: bool,
+    /// Removable or hot-plugged (an external disk that isn't USB).
+    pub removable: bool,
     /// Nothing on it: erasing loses nothing, so no warning.
     pub empty: bool,
     /// At least one way to install is possible.
@@ -160,6 +162,7 @@ fn disk_row(d: &Disk, name: &str) -> DiskRow {
         subtitle: format!("{size} · {what}"),
         icon,
         usb: d.usb,
+        removable: d.removable,
         empty: d.contents.is_empty(),
         selectable,
         reason,
@@ -399,6 +402,30 @@ pub fn encryption_mode(tpm2: bool, on: bool, pin: bool) -> &'static str {
         (true, true) if pin => "tpm-pin",
         (true, true) => "tpm",
         (true, false) => "password",
+    }
+}
+
+/// Quick Install's disk and mode ("erase" or "free-space"), when one
+/// choice is clearly the best and loses nothing: an empty internal disk
+/// (AtlasOS gets a disk of its own, and a Windows disk beside it stays
+/// untouched), else the free space on an internal disk. Never a disk with
+/// files on it to erase, never a USB, removable or hot-plugged disk, and
+/// never a guess between two equally good disks: then None, and the user
+/// chooses on the Disk page. The mode is the one the Disk page preselects.
+pub fn quick_pick(rows: &[DiskRow]) -> Option<(&str, &'static str)> {
+    let internal = || {
+        rows.iter()
+            .filter(|r| r.selectable && !r.usb && !r.removable)
+    };
+    let mode = |r: &DiskRow| if r.free_ok { "free-space" } else { "erase" };
+    let empty: Vec<&DiskRow> = internal()
+        .filter(|r| r.empty && (r.erase_ok || r.free_ok))
+        .collect();
+    let free: Vec<&DiskRow> = internal().filter(|r| r.free_ok).collect();
+    match (empty.as_slice(), free.as_slice()) {
+        ([e], _) => Some((&e.id, mode(e))),
+        ([], [f]) => Some((&f.id, "free-space")),
+        _ => None,
     }
 }
 
@@ -736,6 +763,65 @@ mod tests {
         assert!(!s.selectable && s.usb);
         assert_eq!(s.reason, "Too small: AtlasOS needs 40 GB.");
         assert_eq!(s.icon, "drive-removable-media-usb");
+    }
+
+    #[test]
+    fn quick_install_picks_only_what_loses_nothing() {
+        let rows = disk_rows(&fixture());
+        // Windows (free space), an empty disk, a BitLocker disk, a small USB
+        let crucial = rows[1].id.clone();
+        assert_eq!(quick_pick(&rows), Some((crucial.as_str(), "erase")));
+
+        // No empty disk: the free space beside Windows
+        let no_empty: Vec<DiskRow> = rows.iter().filter(|r| !r.empty).cloned().collect();
+        assert_eq!(
+            quick_pick(&no_empty),
+            Some((rows[0].id.as_str(), "free-space"))
+        );
+
+        // Two empty disks: the user chooses
+        let mut twins = rows.clone();
+        twins[2].empty = true;
+        twins[2].free_ok = false;
+        assert_eq!(quick_pick(&twins), None);
+
+        // Two disks with room, none empty: the user chooses
+        let mut two_free = no_empty.clone();
+        two_free[1].free_ok = true;
+        assert_eq!(quick_pick(&two_free), None);
+
+        // Only data to erase (the BitLocker disk has no room): never
+        assert_eq!(quick_pick(&rows[2..]), None);
+
+        // An empty USB disk is not a quick choice
+        let mut usb = rows[3].clone();
+        usb.selectable = true;
+        usb.empty = true;
+        usb.erase_ok = true;
+        assert_eq!(quick_pick(std::slice::from_ref(&usb)), None);
+        assert_eq!(quick_pick(&[]), None);
+
+        // An empty disk that isn't USB but is removable or hot-plugged: no
+        let mut external = rows.clone();
+        external[1].removable = true;
+        assert_eq!(
+            quick_pick(&external),
+            Some((rows[0].id.as_str(), "free-space"))
+        );
+
+        // An empty disk that can't take AtlasOS (too small): not a choice
+        let mut small = rows.clone();
+        small[1].selectable = false;
+        assert_eq!(
+            quick_pick(&small),
+            Some((rows[0].id.as_str(), "free-space"))
+        );
+
+        // A blank disk with a partition table offers its free space: still
+        // the empty disk, in the mode the Disk page would preselect
+        let mut gpt = rows.clone();
+        gpt[1].free_ok = true;
+        assert_eq!(quick_pick(&gpt), Some((crucial.as_str(), "free-space")));
     }
 
     #[test]

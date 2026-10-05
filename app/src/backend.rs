@@ -19,6 +19,9 @@ pub mod qobject {
         #[qproperty(QString, layouts_json, cxx_name = "layoutsJson")]
         /// view::DiskRow list.
         #[qproperty(QString, disks_json, cxx_name = "disksJson")]
+        /// Quick Install's choice from that list, `{"id": ..., "mode": ...}`,
+        /// or "" when the user has to choose (view::quick_pick).
+        #[qproperty(QString, quick_disk, cxx_name = "quickDisk")]
         /// "loading", "ready" or "error".
         #[qproperty(QString, disks_state, cxx_name = "disksState")]
         #[qproperty(QString, disks_error, cxx_name = "disksError")]
@@ -283,6 +286,7 @@ pub struct BackendRust {
     languages_json: QString,
     layouts_json: QString,
     disks_json: QString,
+    quick_disk: QString,
     disks_state: QString,
     disks_error: QString,
     wifi_json: QString,
@@ -330,6 +334,7 @@ impl Default for BackendRust {
             languages_json: q("[]"),
             layouts_json: q("[]"),
             disks_json: q("[]"),
+            quick_disk: QString::default(),
             disks_state: q("loading"),
             disks_error: QString::default(),
             wifi_json: q("{}"),
@@ -558,11 +563,16 @@ impl qobject::Backend {
                 self.as_mut().set_tpm2(tpm2);
                 self.as_mut().set_secure_boot_off(sb_off);
                 let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into());
+                let quick = view::quick_pick(&rows)
+                    .map(|(id, mode)| serde_json::json!({ "id": id, "mode": mode }).to_string())
+                    .unwrap_or_default();
                 self.as_mut().set_disks_json(q(&json));
+                self.as_mut().set_quick_disk(q(&quick));
                 self.as_mut().set_disks_state(q("ready"));
             }
             Err(e) => {
                 self.as_mut().set_disks_json(q("[]"));
+                self.as_mut().set_quick_disk(QString::default());
                 self.as_mut().set_disks_error(q(&e.message));
                 self.as_mut().set_disks_state(q("error"));
             }

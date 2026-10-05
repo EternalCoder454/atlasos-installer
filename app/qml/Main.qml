@@ -75,6 +75,8 @@ QQC2.ApplicationWindow {
     // the one already active.
     readonly property string wifiUuid: root.backend.wifiUuid || root.wifi.activeUuid || ""
     readonly property string installState: root.backend.installState
+    // Quick Install chose the disk and the defaults: the Review page says so.
+    property bool quick: false
 
     readonly property var allSteps: [
         { key: "welcome", title: qsTr("Welcome") },
@@ -119,6 +121,9 @@ QQC2.ApplicationWindow {
             root.wipePassword();
         }
         root.installRefusal = "";
+        if (key !== "review") {
+            root.quick = false;
+        }
         root.current = key;
         root.reached = Math.max(root.reached, root.allIndex(key));
         stack.replaceCurrentItem(root.pages[key], {}, forward ? QQC2.StackView.PushTransition : QQC2.StackView.PopTransition);
@@ -169,6 +174,38 @@ QQC2.ApplicationWindow {
         root.show("progress");
     }
 
+    // The best defaults, from the Welcome page: the keyboard that goes with
+    // the language, no Wi-Fi step (a connection already up is still copied),
+    // encryption as the PC allows, and the disk Quick Install can choose
+    // without losing anything. Straight to Review, where nothing has started
+    // yet. When the disk is the user's call (none or several fit, or the
+    // list couldn't be read), or a PIN must be typed, the Disk page asks.
+    // `quickReady`: the Welcome page offers it once the disks and networks
+    // are read, so the connection to copy is known.
+    readonly property bool quickReady: root.backend.disksState !== "loading" && root.backend.wifiLoaded
+
+    function quickInstall() {
+        const pick = root.backend.disksState === "ready" && root.backend.quickDisk.length > 0 ? JSON.parse(root.backend.quickDisk) : null;
+        const d = pick ? JSON.parse(root.backend.disksJson).find(r => r.id === pick.id) : undefined;
+        // No clear disk: the Disk page asks, with earlier toggles kept.
+        if (d === undefined) {
+            root.show("disk");
+            return;
+        }
+        root.encryptChoice = "";
+        root.pinChoice = "";
+        root.disk = d;
+        root.mode = pick.mode;
+        // The defaults want a PIN (a TPM with Secure Boot off): the Disk
+        // page opens with the disk chosen, for the PIN to be typed there.
+        if (root.needsSecret) {
+            root.show("disk");
+            return;
+        }
+        root.quick = true;
+        root.show("review");
+    }
+
     // After a failed install, or when the disk changed: back to the Disk step.
     function chooseDiskAgain() {
         root.backend.resetInstall();
@@ -200,7 +237,7 @@ QQC2.ApplicationWindow {
         }
         root.pinChoice = root.backend.demoPin ? "on" : "";
         const disks = JSON.parse(root.backend.disksJson);
-        if (disks.length > 0 && target !== "disk") {
+        if (disks.length > 0 && root.allIndex(target) > root.allIndex("disk")) {
             root.disk = disks[0];
             root.mode = disks[0].freeOk ? "free-space" : "erase";
         }
