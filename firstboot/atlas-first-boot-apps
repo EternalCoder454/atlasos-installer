@@ -408,7 +408,10 @@ def do_toolbox(pkgs):
     def step():
         start_notice()
         if not toolbox_exists(name):
-            check(["toolbox", "create", "-y", "-c", name], 3600, "Creating the toolbox")
+            # toolbox does not know ID=atlasos and would fall back to its own default release.
+            release = name.rsplit("-", 1)[1]
+            check(["toolbox", "create", "-y", "-c", name, "--distro", "fedora", "--release", release],
+                  3600, "Creating the toolbox")
         check(["toolbox", "run", "-c", name, "sudo", "dnf", "install", "-y"] + pkgs, 3600,
               "Installing toolbox packages")
     retry(step)

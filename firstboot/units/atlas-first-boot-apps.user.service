@@ -3,6 +3,10 @@ Description=Add your chosen AtlasOS apps (developer tools)
 # Runs when the record has per-account apps, or when a result is waiting to be shown.
 ConditionPathExists=|/var/lib/atlasos/first-boot-apps.json
 ConditionPathExists=|/var/lib/atlasos/first-boot-apps.status
+# Run beside the session, not as part of starting it: a target waits for the
+# oneshots it wants, so graphical-session.target (and with it xdg-desktop-portal
+# and the autostart apps) would sit out every retry while offline.
+After=graphical-session.target
 
 [Service]
 Type=oneshot
@@ -14,9 +18,8 @@ RestartSteps=5
 RestartMaxDelaySec=30min
 RestartPreventExitStatus=78
 # No NoNewPrivileges or PrivateTmp: rootless podman's newuidmap and the toolbox's
-# sudo are setuid and would break.
-LockPersonality=yes
-RestrictRealtime=yes
+# sudo are setuid and would break. That rules out LockPersonality= and
+# RestrictRealtime= too: in a user unit they imply NoNewPrivileges=yes.
 
 [Install]
 WantedBy=graphical-session.target

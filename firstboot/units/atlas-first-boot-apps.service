@@ -1,7 +1,8 @@
 [Unit]
 Description=Install the apps chosen in the AtlasOS installer
 Wants=network-online.target
-After=network-online.target
+# After multi-user.target too, so the boot is not held up for the retries while offline.
+After=network-online.target multi-user.target
 ConditionPathExists=/var/lib/atlasos/first-boot-apps.json
 
 [Service]
