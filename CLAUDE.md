@@ -116,7 +116,8 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   (`iso/Containerfile.pin`, `iso/pin-builds.sh`, signed RPMs from Koji).
   - plasmalogin logs the `atlas-installer` user (from sysusers, with its
     home in `/run/atlas-installer-session`) into a Plasma session. It has
-    no panel and no screen lock, and allows only plasma-setup's shortcuts.
+    no panel and no screen lock, and allows only the screen reader and
+    zoom shortcuts (its own `kglobalaccelrc`, adapted from plasma-setup).
   - The session autostarts `/usr/libexec/atlas-installer-session`. It runs
     the installer with `--fullscreen` and starts it again if it closes.
   - The polkit rule `50-atlas-installer-session.rules` allows that user the
