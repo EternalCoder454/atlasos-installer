@@ -124,7 +124,7 @@ pub fn x11_keyboard_conf(k: &Keymap) -> String {
 }
 
 /// `/etc/atlasos/installer.ini`: what the installer already asked, so
-/// AtlasOS's first-run wizard (plasma-setup) can skip those pages. `network`
+/// AtlasOS's first-run wizard (Atlas Wizard) can skip those pages. `network`
 /// is true when a Wi-Fi connection was carried over or the PC was on a
 /// cable; the wizard still shows its Wi-Fi page when it finds itself offline.
 /// The locale and keymap are validated, so neither can hold a newline.

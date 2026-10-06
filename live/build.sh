@@ -32,8 +32,6 @@ cp -a /src/installer/root/. /
 # The live session: autologin as atlas-installer into a bare Plasma session
 # that runs the installer full-screen (rootfs/usr/share/atlas-installer-session).
 cp -a /src/rootfs/. /
-# plasma-setup's allow list of global shortcuts: screen reader and zoom only.
-cp /usr/share/plasma-setup/kglobalaccelrc /usr/share/atlas-installer-session/config/
 systemd-sysusers /usr/lib/sysusers.d/atlas-installer-session.conf
 
 # Nothing that updates, installs or checks the system runs live: the live

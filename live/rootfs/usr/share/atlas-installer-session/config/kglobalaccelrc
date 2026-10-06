@@ -1,0 +1,17 @@
+# -*- mode: ini -*-
+
+# SPDX-FileCopyrightText: 2025 Kristen McWilliam <kristen@kde.org>
+#
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
+# Adapted from plasma-setup's kglobalaccelrc, which the image no longer
+# ships. The installer's live session allows only a few essential global
+# shortcuts, so nothing can interfere with the install: the screen reader
+# and zoom.
+
+[General]
+useAllowList=true
+
+[AllowedShortcuts]
+kaccess=Toggle Screen Reader On and Off
+kwin=MoveZoomDown,MoveZoomLeft,MoveZoomRight,MoveZoomUp,view_actual_size,view_zoom_in,view_zoom_out
