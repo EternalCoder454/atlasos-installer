@@ -188,6 +188,7 @@ InstallerPage {
 
         ListFrame {
             id: frame
+            fitContent: true
             Layout.fillWidth: true
             Layout.fillHeight: true
             model: page.networks
@@ -237,6 +238,10 @@ InstallerPage {
             shown: page.app.backend.wifiError.length > 0
             type: "error"
             text: page.app.backend.wifiError
+        }
+        // What a short list leaves over goes below it, not around it.
+        Item {
+            Layout.fillHeight: true
         }
     }
 }

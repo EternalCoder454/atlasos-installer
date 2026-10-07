@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Templates as T
 import org.kde.kirigami as Kirigami
+import Telamon.Ui
 
 // The violet panel beside every page: the Telamon OS mark, a drawing for the
 // current step, and the steps as quiet dots. Done steps can be clicked to
@@ -19,17 +20,21 @@ Rectangle {
     required property int reached
     required property bool canGoBack
     property bool demo: false
+    // The icon theme has the `telamon` mark.
+    property bool osLogo: false
 
     signal stepClicked(string key)
 
     readonly property int currentIndex: panel.steps.findIndex(s => s.key === panel.current)
     readonly property bool darkTheme: Kirigami.ColorUtils.brightnessForColor(Kirigami.Theme.backgroundColor) === Kirigami.ColorUtils.Dark
+    // telamon-lint: allow-raw the panel is the brand's violet in either theme
     readonly property color ink: "#ffffff"
 
+    // The brand's violet, not the theme's colours.
     gradient: Gradient {
-        GradientStop { position: 0; color: panel.darkTheme ? "#5545c9" : "#6a58e6" }
-        GradientStop { position: 0.55; color: panel.darkTheme ? "#3b2fa0" : "#4b3cc0" }
-        GradientStop { position: 1; color: panel.darkTheme ? "#211a66" : "#2f2690" }
+        GradientStop { position: 0; color: panel.darkTheme ? "#5545c9" : "#6a58e6" } // telamon-lint: allow-raw brand violet
+        GradientStop { position: 0.55; color: panel.darkTheme ? "#3b2fa0" : "#4b3cc0" } // telamon-lint: allow-raw brand violet
+        GradientStop { position: 1; color: panel.darkTheme ? "#211a66" : "#2f2690" } // telamon-lint: allow-raw brand violet
     }
     clip: true
 
@@ -61,10 +66,13 @@ Rectangle {
 
         RowLayout {
             spacing: Kirigami.Units.largeSpacing
+            // The Telamon OS mark: the image's own `telamon` icon when the
+            // icon theme has it (the live session does), else the copy
+            // bundled here (a dev container, or an older image).
             Kirigami.Icon {
                 implicitWidth: Kirigami.Units.iconSizes.medium
                 implicitHeight: Kirigami.Units.iconSizes.medium
-                source: "qrc:/qt/qml/net/eterneon/telamon/installer/data/atlasos-logo.svg"
+                source: panel.osLogo ? "telamon" : "qrc:/qt/qml/net/eterneon/telamon/installer/data/telamon-logo.svg"
                 isMask: true
                 color: panel.ink
                 Accessible.ignored: true
@@ -96,10 +104,17 @@ Rectangle {
                     sourceSize.width: w * 2
                     sourceSize.height: w * 1.5
                     fillMode: Image.PreserveAspectFit
-                    source: "qrc:/qt/qml/net/eterneon/telamon/installer/data/art/" + art.modelData.key + ".svg"
-                    opacity: art.modelData.key === panel.current ? 1 : 0
+                    // Drawn (and kept) only once its step has been current:
+                    // the eight drawings otherwise all load at start-up.
+                    asynchronous: true
+                    property bool wanted: false
+                    readonly property bool isCurrent: art.modelData.key === panel.current
+                    onIsCurrentChanged: if (art.isCurrent) art.wanted = true
+                    Component.onCompleted: if (art.isCurrent) art.wanted = true
+                    source: art.wanted ? "qrc:/qt/qml/net/eterneon/telamon/installer/data/art/" + art.modelData.key + ".svg" : ""
+                    opacity: art.isCurrent ? 1 : 0
                     visible: opacity > 0
-                    scale: art.modelData.key === panel.current ? 1 : 0.96
+                    scale: art.isCurrent ? 1 : 0.96
                     Accessible.ignored: true
                     Behavior on opacity {
                         NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
@@ -155,7 +170,7 @@ Rectangle {
                     }
 
                     background: Rectangle {
-                        radius: 6
+                        radius: TelamonStyle.radius
                         anchors.fill: parent
                         anchors.leftMargin: -Kirigami.Units.smallSpacing
                         color: Qt.alpha(panel.ink, step.down ? 0.14 : step.hovered ? 0.08 : 0)
@@ -182,7 +197,7 @@ Rectangle {
                                 visible: step.isCurrent
                                 width: 16
                                 height: 16
-                                radius: 8
+                                radius: TelamonStyle.radiusLarge
                                 color: Qt.alpha(panel.ink, 0.22)
                             }
                         }
@@ -208,6 +223,7 @@ Rectangle {
             visible: panel.demo
             text: qsTr("Demo: nothing here is real, and nothing is installed.")
             wrapMode: Text.Wrap
+            // telamon-lint: allow-raw a warm note that reads on the violet in both themes
             color: "#ffd98a"
             font.family: Kirigami.Theme.defaultFont.family
             font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9

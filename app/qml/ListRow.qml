@@ -37,6 +37,19 @@ FocusScope {
     Keys.onEnterPressed: event => row.activate(event)
     Keys.onSpacePressed: event => row.activate(event)
 
+    // The keyboard is in a field of the expansion (a password): that field
+    // draws its own ring, so the row doesn't draw a second one around both.
+    readonly property bool focusInExpansion: {
+        let item = row.Window.window ? row.Window.window.activeFocusItem : null;
+        while (item) {
+            if (item === expansionCol) {
+                return true;
+            }
+            item = item.parent;
+        }
+        return false;
+    }
+
     function activate(event) {
         if (row.clickable && !event.isAutoRepeat) {
             row.clicked();
@@ -64,7 +77,7 @@ FocusScope {
         anchors.fill: parent
         anchors.margins: 3
         TelamonFocusRing {
-            shown: row.ListView.isCurrentItem && row.ListView.view.activeFocus
+            shown: row.ListView.isCurrentItem && row.ListView.view.activeFocus && !row.focusInExpansion
             gap: 0
             radius: TelamonStyle.radius
         }

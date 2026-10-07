@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QEvent>
+#include <QIcon>
 #include <QStyleHints>
 #include <QTimer>
 #include <QQmlApplicationEngine>
@@ -93,6 +94,8 @@ int main(int argc, char *argv[])
     engine.setInitialProperties({
         {QStringLiteral("backend"), QVariant::fromValue(backend.get())},
         {QStringLiteral("fullScreen"), parser.isSet(fullScreen)},
+        // The image's own Telamon OS mark, when the icon theme has it.
+        {QStringLiteral("osLogo"), QIcon::hasThemeIcon(QStringLiteral("telamon"))},
         // Demo mode only: open at this step, for screenshots.
         {QStringLiteral("demoPage"), QString::fromUtf8(telamon_demo_page())},
     });

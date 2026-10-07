@@ -56,7 +56,7 @@ qt_add_qml_module(telamon-installer-app
         qml/WelcomePage.qml qml/KeyboardPage.qml qml/WifiPage.qml qml/AppsPage.qml qml/DiskPage.qml
         qml/ReviewPage.qml qml/ProgressPage.qml qml/RestartPage.qml
     RESOURCES
-        data/atlasos-logo.svg
+        data/telamon-logo.svg
         data/art/welcome.svg data/art/keyboard.svg data/art/wifi.svg data/art/apps.svg data/art/disk.svg
         data/art/review.svg data/art/progress.svg data/art/restart.svg
 )
@@ -68,6 +68,6 @@ target_link_libraries(telamon-installer-app PRIVATE
 install(TARGETS telamon-installer-app RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES data/net.eterneon.telamon.installer.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES data/atlasos-logo.svg
+install(FILES data/telamon-logo.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
         RENAME net.eterneon.telamon.installer.svg)

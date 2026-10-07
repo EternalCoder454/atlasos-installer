@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls as QQC2
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import Telamon.Ui
 
@@ -13,11 +14,16 @@ Rectangle {
     property alias currentIndex: list.currentIndex
     property alias list: list
     property string emptyText
+    // A short list gets a short frame, not an empty box down to the footer.
+    property bool fitContent: false
+
+    Layout.maximumHeight: frame.fitContent ? list.contentHeight + 2 : Number.POSITIVE_INFINITY
 
     radius: TelamonStyle.radiusLarge
-    color: Kirigami.Theme.backgroundColor.hslLightness > 0.5 ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.5) : Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(1, 1, 1, 0.06))
+    // The same card as a Section, so lists and sections sit alike.
+    color: TelamonStyle.surface
     border.width: 1
-    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.12)
+    border.color: TelamonStyle.separator
     clip: true
 
     function positionAt(index) {
@@ -30,7 +36,7 @@ Rectangle {
         anchors.margins: 1
         // Beside the scroll bar, not under it: rows end where it starts, so
         // nothing at their right edge (a lock, a checkmark) is covered.
-        anchors.rightMargin: 1 + (bar.visible ? bar.width : 0)
+        anchors.rightMargin: 1 + (bar.size < 1 ? bar.width : 0)
         clip: true
         keyNavigationEnabled: true
         boundsBehavior: Flickable.StopAtBounds
@@ -38,13 +44,12 @@ Rectangle {
         activeFocusOnTab: true
         QQC2.ScrollBar.vertical: bar
     }
-    QQC2.ScrollBar {
+    TelamonScrollBar {
         id: bar
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         anchors.margins: 1
-        policy: QQC2.ScrollBar.AsNeeded
     }
 
     QQC2.Label {

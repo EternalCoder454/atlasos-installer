@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Telamon.Ui
 
 QQC2.ApplicationWindow {
     id: root
@@ -12,6 +11,8 @@ QQC2.ApplicationWindow {
     // Both come from main.cpp (setInitialProperties).
     required property var backend
     required property bool fullScreen
+    // The icon theme has the `telamon` mark (the Telamon OS image does).
+    required property bool osLogo
     // Demo mode: the step to open at ("" for the first); "wifi-hidden"
     // opens the Wi-Fi page with the form for a hidden network.
     required property string demoPage
@@ -324,6 +325,7 @@ QQC2.ApplicationWindow {
             reached: root.steps.reduce((n, s, i) => root.allIndex(s.key) <= root.reached ? i : n, 0)
             canGoBack: root.canGoBack
             demo: root.backend.demo
+            osLogo: root.osLogo
             onStepClicked: key => root.show(key)
         }
 
