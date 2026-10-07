@@ -7,14 +7,14 @@
 # Caches live in named podman volumes. The container has no system bus, so
 # the app can only run in demo mode there (ATLAS_INSTALLER_DEMO).
 #
-# The UI builds against the installed Atlas.Ui (atlas-framework). Here it is
+# The UI builds against the installed Telamon.Ui (atlas-framework). Here it is
 # built from the atlas-framework checkout at $ATLAS_FRAMEWORK_SRC (default
 # ../Atlas Framework, next to this repository) into the container's /usr.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # ATLAS_DEV_IMAGE names another image to run in, used as it is: iso/make-iso.sh
 # uses one pinned to the Qt, Kirigami and glibc of the image it builds an ISO
-# of, with that image's Atlas.Ui.
+# of, with that image's Telamon.Ui.
 image=${ATLAS_DEV_IMAGE:-}
 if [ -n "$image" ]; then
 	podman image exists "$image" || { echo "dev.sh: no image $image" >&2; exit 1; }
@@ -27,9 +27,9 @@ else
 	podman image exists localhost/atlas-installer-dev ||
 		podman build -q -t localhost/atlas-installer-dev -f app/Containerfile.dev app >/dev/null
 	# Cached: rebuilt only when the framework's source changes.
-	image=localhost/atlas-installer-dev:atlas-ui
+	image=localhost/atlas-installer-dev:telamon-ui
 	podman build -q -t "$image" --build-context atlas-framework="$framework" \
-		-f app/Containerfile.atlas-ui app >/dev/null
+		-f app/Containerfile.telamon-ui app >/dev/null
 fi
 if [ $# -eq 0 ]; then
 	set -- bash -c 'cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build/app'

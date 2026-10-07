@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 2: the keyboard layout, a variant if it has one, and a field to try
 // it in. The layout switches in the live session at once.
@@ -94,7 +94,7 @@ InstallerPage {
             SectionRow {
                 visible: page.layout !== null && page.layout.variants.length > 0
                 title: qsTr("Variant")
-                AtlasComboBox {
+                TelamonComboBox {
                     id: variants
                     width: Kirigami.Units.gridUnit * 16
                     textRole: "name"
@@ -110,7 +110,7 @@ InstallerPage {
             }
             SectionRow {
                 title: qsTr("Try it")
-                AtlasTextField {
+                TelamonTextField {
                     width: Kirigami.Units.gridUnit * 16
                     placeholderText: qsTr("Type here to test")
                     Accessible.name: placeholderText

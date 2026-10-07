@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 5: which disk, then erase it or use its free space.
 InstallerPage {
@@ -92,7 +92,7 @@ InstallerPage {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: Kirigami.Units.gridUnit * 3
                 spacing: Kirigami.Units.largeSpacing
-                AtlasSpinner {
+                TelamonSpinner {
                     running: parent.visible
                 }
                 QQC2.Label {
@@ -106,7 +106,7 @@ InstallerPage {
                 visible: page.diskState === "error" || page.diskState === "ready" && page.disks.length === 0
                 Layout.topMargin: Kirigami.Units.gridUnit * 2
                 iconName: page.diskState === "error" ? "window-close-symbolic" : "drive-harddisk-symbolic"
-                tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : AtlasStyle.accent
+                tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : TelamonStyle.accent
                 headline: page.diskState === "error" ? qsTr("Couldn't read the disks") : qsTr("No disk found")
                 subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("AtlasOS needs a disk of at least %1. Connect one, then look again.").arg(page.backend.minDiskSize)
                 SecondaryButton {
@@ -236,7 +236,7 @@ InstallerPage {
 
                     readonly property bool pin: page.app.encryption === "tpm-pin"
 
-                    AtlasPasswordField {
+                    TelamonPasswordField {
                         id: secretField
                         Layout.fillWidth: true
                         placeholderText: secretBox.pin ? qsTr("PIN") : qsTr("Password")
@@ -245,7 +245,7 @@ InstallerPage {
                         onTextChanged: page.app.password = text
                         onAccepted: confirmField.forceActiveFocus()
                     }
-                    AtlasPasswordField {
+                    TelamonPasswordField {
                         id: confirmField
                         Layout.fillWidth: true
                         placeholderText: secretBox.pin ? qsTr("Confirm PIN") : qsTr("Confirm password")

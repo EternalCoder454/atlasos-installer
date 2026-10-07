@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 8: done. Restart, plus the NVIDIA key steps when the helper queued
 // the key, and anything that went wrong without failing the install.
@@ -73,8 +73,8 @@ InstallerPage {
                         Layout.alignment: Qt.AlignHCenter
                         implicitWidth: Math.min(keyColumn.implicitWidth + Kirigami.Units.gridUnit * 2, parent.width)
                         implicitHeight: keyColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
-                        radius: AtlasStyle.radiusLarge
-                        color: AtlasStyle.selection
+                        radius: TelamonStyle.radiusLarge
+                        color: TelamonStyle.selection
                         ColumnLayout {
                             id: keyColumn
                             anchors.centerIn: parent
@@ -88,8 +88,8 @@ InstallerPage {
                                     readOnly: true
                                     selectByMouse: true
                                     color: Kirigami.Theme.textColor
-                                    selectionColor: AtlasStyle.accent
-                                    selectedTextColor: AtlasStyle.accentText
+                                    selectionColor: TelamonStyle.accent
+                                    selectedTextColor: TelamonStyle.accentText
                                     font.family: "monospace"
                                     font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
                                     font.weight: Font.DemiBold
@@ -100,7 +100,7 @@ InstallerPage {
                             }
                         }
                     }
-                    // Atlas.Ui's switch, as on the Disk page: Breeze's
+                    // Telamon.Ui's switch, as on the Disk page: Breeze's
                     // check box is a near-invisible square in AtlasOS Dark,
                     // and this one gates Restart.
                     RowLayout {
@@ -114,7 +114,7 @@ InstallerPage {
                                 onTapped: savedSwitch.toggle()
                             }
                         }
-                        AtlasSwitch {
+                        TelamonSwitch {
                             id: savedSwitch
                             onCheckedChanged: page.keySaved = checked
                             Accessible.name: qsTr("I've saved my recovery key")
@@ -168,8 +168,8 @@ InstallerPage {
                         Layout.topMargin: Kirigami.Units.smallSpacing
                         implicitWidth: pw.implicitWidth + Kirigami.Units.gridUnit * 2
                         implicitHeight: pw.implicitHeight + Kirigami.Units.largeSpacing * 2
-                        radius: AtlasStyle.radiusLarge
-                        color: AtlasStyle.selection
+                        radius: TelamonStyle.radiusLarge
+                        color: TelamonStyle.selection
                         QQC2.Label {
                             id: pw
                             anchors.centerIn: parent

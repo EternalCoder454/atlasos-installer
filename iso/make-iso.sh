@@ -185,17 +185,17 @@ if [ "$have" != "$want" ]; then
 	}
 fi
 
-# The installer builds against the installed Atlas.Ui: the image's own copy
-# (iso/Containerfile.atlas-ui), the one the live system runs it with.
-podman run --rm --pull=never --entrypoint test "$base" -f /usr/lib64/qt6/qml/Atlas/Ui/qmldir || {
-	echo "$base has no Atlas.Ui (atlas-ui): build it from an AtlasOS with atlas-framework" >&2
+# The installer builds against the installed Telamon.Ui: the image's own copy
+# (iso/Containerfile.telamon-ui), the one the live system runs it with.
+podman run --rm --pull=never --entrypoint test "$base" -f /usr/lib64/qt6/qml/Telamon/Ui/qmldir || {
+	echo "$base has no Telamon.Ui (telamon-ui): build it from an AtlasOS with atlas-framework" >&2
 	exit 1
 }
 from=$(podman image inspect --format '{{.Id}}' "$dev")
 devui=localhost/atlas-installer-dev:iso-$(echo "$from $base" | sha256sum | cut -c1-12)
 podman image exists "$devui" ||
 	podman build -q --pull=never -t "$devui" --build-arg DEV_IMAGE="$dev" --build-arg BASE_IMAGE="$base" \
-		-f iso/Containerfile.atlas-ui iso >/dev/null
+		-f iso/Containerfile.telamon-ui iso >/dev/null
 
 echo ">> Building the installer"
 ATLAS_DEV_IMAGE=$devui app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {

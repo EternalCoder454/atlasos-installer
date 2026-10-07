@@ -29,18 +29,18 @@ the partitions as planned and that the old ones are unchanged.
 The UI is built and tested only in its container (`app/Containerfile.dev`),
 through `app/dev.sh`, so its Qt and Kirigami match the live image's.
 
-The shared controls (`import Atlas.Ui`) come from
+The shared controls (`import Telamon.Ui`) come from
 [atlas-framework](https://github.com/EternalCoder454/atlas-framework),
 installed in Qt's QML directory like Kirigami; the app links nothing from it.
 `app/dev.sh` builds it from a checkout beside this one (`../Atlas Framework`,
-or `ATLAS_FRAMEWORK_SRC`) into `localhost/atlas-installer-dev:atlas-ui`
-(`app/Containerfile.atlas-ui`). The ISO build instead copies it from the
-AtlasOS image it embeds (`iso/Containerfile.atlas-ui`), so the installer is
-built against the exact Atlas.Ui the live session runs. Atlas.Ui changes go
-to atlas-framework, never here. The installer needs Atlas.Ui 1.3.0 or newer
-(AtlasTextField, AtlasComboBox, AtlasSpinner): configuring stops with a plain
+or `ATLAS_FRAMEWORK_SRC`) into `localhost/atlas-installer-dev:telamon-ui`
+(`app/Containerfile.telamon-ui`). The ISO build instead copies it from the
+AtlasOS image it embeds (`iso/Containerfile.telamon-ui`), so the installer is
+built against the exact Telamon.Ui the live session runs. Telamon.Ui changes go
+to atlas-framework, never here. The installer needs Telamon.Ui 1.3.0 or newer
+(TelamonTextField, TelamonComboBox, TelamonSpinner): configuring stops with a plain
 message against an older one, which for an ISO means an AtlasOS image that
-ships `atlas-ui` older than 1.3.0.
+ships `telamon-ui` older than 1.3.0.
 
 Clippy and rustfmt for the workspace also run in a container:
 

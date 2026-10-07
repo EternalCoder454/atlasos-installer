@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 QQC2.ApplicationWindow {
     id: root

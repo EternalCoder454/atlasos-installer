@@ -11,7 +11,7 @@
 #include <memory>
 
 // Defined in src/lib.rs.
-extern "C" void *atlas_backend_new();
+extern "C" void *telamon_backend_new();
 // Defined in src/demo.rs: the demo step, empty unless demo mode is allowed.
 extern "C" const char *atlas_demo_page();
 
@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
     }
 
     // Declared before the engine, so it outlives the QML that binds to it.
-    const std::unique_ptr<QObject> backend(static_cast<QObject *>(atlas_backend_new()));
+    const std::unique_ptr<QObject> backend(static_cast<QObject *>(telamon_backend_new()));
 
     QQmlApplicationEngine engine;
     engine.setInitialProperties({

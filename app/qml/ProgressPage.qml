@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 7: the install. No cancel: once the disk is being changed, stopping
 // halfway would leave it worse off. On failure, what happened and what next.
@@ -46,7 +46,7 @@ InstallerPage {
             textFormat: Text.PlainText
             Accessible.role: Accessible.Heading
         }
-        AtlasProgressBar {
+        TelamonProgressBar {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.largeSpacing
             value: page.backend.progress

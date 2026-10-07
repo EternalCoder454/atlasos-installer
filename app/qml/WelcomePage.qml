@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 import net.eterneon.atlas.installer
 
 // Step 1: a welcome, and the installed system's language.

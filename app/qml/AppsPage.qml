@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 4: which apps to add at the first start. Built from the catalog
 // (firstboot/apps.json): a new entry there shows up here with no change.

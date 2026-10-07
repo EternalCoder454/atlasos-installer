@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // A big selectable card for the Disk page's two ways to install. A card
 // that isn't possible is greyed out and says why.
@@ -35,16 +35,16 @@ FocusScope {
 
     Rectangle {
         anchors.fill: parent
-        radius: AtlasStyle.radiusLarge
-        color: card.selected ? AtlasStyle.selection : Kirigami.Theme.backgroundColor.hslLightness > 0.5 ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.5) : Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(1, 1, 1, hover.hovered && card.possible ? 0.09 : 0.06))
+        radius: TelamonStyle.radiusLarge
+        color: card.selected ? TelamonStyle.selection : Kirigami.Theme.backgroundColor.hslLightness > 0.5 ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.5) : Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(1, 1, 1, hover.hovered && card.possible ? 0.09 : 0.06))
         border.width: card.selected ? 2 : 1
-        border.color: card.selected ? AtlasStyle.accent : Qt.alpha(Kirigami.Theme.textColor, hover.hovered && card.possible ? 0.25 : 0.12)
+        border.color: card.selected ? TelamonStyle.accent : Qt.alpha(Kirigami.Theme.textColor, hover.hovered && card.possible ? 0.25 : 0.12)
         Behavior on color {
             ColorAnimation {
-                duration: AtlasStyle.durationShort
+                duration: TelamonStyle.durationShort
             }
         }
-        AtlasFocusRing {
+        TelamonFocusRing {
             shown: card.activeFocus && !tap.pressed
             radius: parent.radius + gap
         }
@@ -74,14 +74,14 @@ FocusScope {
             Layout.preferredWidth: size
             Layout.preferredHeight: size
             radius: size / 2
-            color: Qt.alpha(card.destructive && card.possible ? Kirigami.Theme.negativeTextColor : AtlasStyle.accent, 0.14)
+            color: Qt.alpha(card.destructive && card.possible ? Kirigami.Theme.negativeTextColor : TelamonStyle.accent, 0.14)
             Kirigami.Icon {
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.smallMedium
                 height: width
                 source: card.iconName
                 isMask: true
-                color: card.destructive && card.possible ? Kirigami.Theme.negativeTextColor : AtlasStyle.accent
+                color: card.destructive && card.possible ? Kirigami.Theme.negativeTextColor : TelamonStyle.accent
             }
         }
         ColumnLayout {
@@ -112,7 +112,7 @@ FocusScope {
             Layout.preferredHeight: size
             radius: size / 2
             // Filled accent with a light dot when chosen, like a macOS radio.
-            color: card.selected ? AtlasStyle.accent : "transparent"
+            color: card.selected ? TelamonStyle.accent : "transparent"
             border.width: card.selected ? 0 : 1
             border.color: Qt.alpha(Kirigami.Theme.textColor, 0.4)
             Rectangle {
@@ -121,7 +121,7 @@ FocusScope {
                 width: Math.round(parent.size * 0.4)
                 height: width
                 radius: width / 2
-                color: AtlasStyle.accentText
+                color: TelamonStyle.accentText
             }
         }
     }

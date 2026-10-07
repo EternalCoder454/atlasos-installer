@@ -1,14 +1,14 @@
-# The dev container (app/Containerfile.dev) with Atlas.Ui installed, built
+# The dev container (app/Containerfile.dev) with Telamon.Ui installed, built
 # from atlas-framework's source: the build context named "atlas-framework".
 # app/dev.sh builds it:
 #
 #   podman build --build-context atlas-framework=<atlas-framework checkout> \
-#     -t localhost/atlas-installer-dev:atlas-ui -f app/Containerfile.atlas-ui app
+#     -t localhost/atlas-installer-dev:telamon-ui -f app/Containerfile.telamon-ui app
 #
-# The ISO build uses the Atlas.Ui of the AtlasOS image instead
-# (iso/Containerfile.atlas-ui).
+# The ISO build uses the Telamon.Ui of the AtlasOS image instead
+# (iso/Containerfile.telamon-ui).
 FROM localhost/atlas-installer-dev
-# Atlas.Ui's own build dependencies
+# Telamon.Ui's own build dependencies
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf -y -q --setopt=keepcache=1 --setopt=install_weak_deps=False install \
         kf6-kwindowsystem-devel kf6-kconfig-devel \
@@ -19,13 +19,13 @@ RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
 # another Qt or compiler can't be trusted (moc and qmlcachegen aren't tracked
 # as dependencies): the build starts over when they change.
 COPY --from=atlas-framework --exclude=.git --exclude=build --exclude=out --exclude=template / /atlas-framework
-RUN --mount=type=cache,target=/var/cache/atlas-ui-build,sharing=locked \
+RUN --mount=type=cache,target=/var/cache/telamon-ui-build,sharing=locked \
     toolchain=$(rpm -q gcc-c++ cmake qt6-qtbase-devel qt6-qtdeclarative-devel kf6-kirigami-devel kf6-kconfig-devel kf6-kwindowsystem-devel) \
-    && if [ "$(cat /var/cache/atlas-ui-build/.toolchain 2>/dev/null)" != "$toolchain" ]; then \
-        rm -rf /var/cache/atlas-ui-build/* /var/cache/atlas-ui-build/.[!.]* \
-        && printf '%s\n' "$toolchain" >/var/cache/atlas-ui-build/.toolchain; \
+    && if [ "$(cat /var/cache/telamon-ui-build/.toolchain 2>/dev/null)" != "$toolchain" ]; then \
+        rm -rf /var/cache/telamon-ui-build/* /var/cache/telamon-ui-build/.[!.]* \
+        && printf '%s\n' "$toolchain" >/var/cache/telamon-ui-build/.toolchain; \
     fi \
-    && cmake -S /atlas-framework -B /var/cache/atlas-ui-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    && cmake -S /atlas-framework -B /var/cache/telamon-ui-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr -DATLAS_BUILD_GALLERY=OFF >/dev/null \
-    && cmake --build /var/cache/atlas-ui-build \
-    && cmake --install /var/cache/atlas-ui-build >/dev/null
+    && cmake --build /var/cache/telamon-ui-build \
+    && cmake --install /var/cache/telamon-ui-build >/dev/null
