@@ -31,6 +31,7 @@ RECORD = Path("/var/lib/atlasos/first-boot-apps.json")
 STATUS = Path("/var/lib/atlasos/first-boot-apps.status")
 CATALOG = Path("/usr/share/atlasos/first-boot-apps.json")
 OS_RELEASE = Path("/etc/os-release")
+PCI_DEVICES = Path("/sys/bus/pci/devices")
 STATE_DIR = Path.home() / ".local/state/atlasos"
 BIN_DIR = Path.home() / ".local/bin"
 RUNTIME_DIR = Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get("XDG_RUNTIME_DIR") else None
@@ -105,8 +106,33 @@ def load_catalog():
     cat = {}
     for e in entries:
         if isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("install"), str):
-            cat[e["id"]] = e["install"]
+            cat[e["id"]] = (e["install"], refs(e, "extra"), refs(e, "extra_amd"))
     return cat
+
+
+def refs(entry, key):
+    """An entry's flatpak add-ons (a list of app ids); anything else counts as none."""
+    v = entry.get(key, [])
+    if isinstance(v, list) and all(isinstance(r, str) and FLATPAK_RE.match(r) for r in v):
+        return v
+    log("catalog entry %r has a %s value that is not understood" % (entry.get("id"), key))
+    return []
+
+
+def has_amd_gpu():
+    """True when a PCI display controller (class 0x03) is from AMD (vendor 0x1002)."""
+    try:
+        devices = list(PCI_DEVICES.iterdir())
+    except OSError:
+        return False
+    for d in devices:
+        try:
+            if ((d / "vendor").read_text().strip().lower() == "0x1002"
+                    and (d / "class").read_text().strip().lower().startswith("0x03")):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def load_record(check_owner=False):
@@ -140,17 +166,19 @@ def load_record(check_owner=False):
 
 
 def classify(ids, catalog):
-    """Return ([(id, kind, arg)], [unknown ids]). Nothing is executed from the record."""
+    """Return ([(id, kind, arg)], [unknown ids]). Nothing is executed from the record.
+    A flatpak's arg is the list of refs to install: the app, then its add-ons."""
     out, unknown = [], []
     for i in ids:
-        install = catalog.get(i)
-        if install is None:
+        entry = catalog.get(i)
+        if entry is None:
             log("app id %r is not in this version's catalog" % i)
             unknown.append(i)
             continue
+        install, extra, extra_amd = entry
         kind, _, arg = install.partition(":")
         if kind == "flatpak" and FLATPAK_RE.match(arg):
-            out.append((i, "flatpak", arg))
+            out.append((i, "flatpak", [arg] + extra + (extra_amd if extra_amd and has_amd_gpu() else [])))
         elif kind == "mise" and not arg:
             out.append((i, "mise", ""))
         elif kind == "mise" and TOOL_RE.match(arg):
@@ -256,7 +284,7 @@ def system_mode():
         except OSError as we:
             log("cannot write status: %s" % we)
         return EX_PERMANENT
-    flat = [(i, a) for i, k, a in entries if k == "flatpak"]
+    flat = [(i, r) for i, k, r in entries if k == "flatpak"]
     names = [i for i, _ in flat]
     remaining = list(ids)
     failed, reason, permanent = [], "", False
@@ -268,10 +296,11 @@ def system_mode():
         except Failed as e:
             failed, reason, permanent = list(names), e.reason, not e.retry
         else:
-            for n, (i, app) in enumerate(flat):
+            for n, (i, apps) in enumerate(flat):
                 try:
-                    check(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub", app],
-                          7200, "Installing %s from Flathub" % i)
+                    for app in apps:
+                        check(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub", app],
+                              7200, "Installing %s from Flathub" % i)
                 except Failed as e:
                     reason, permanent = e.reason, permanent or not e.retry
                     if not e.retry:  # nothing else can work either
