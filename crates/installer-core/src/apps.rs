@@ -31,6 +31,13 @@ pub struct App {
     /// for each account), `mise:<tool>` (through mise), or
     /// `toolbox:<packages>` (Fedora packages in a toolbox).
     pub install: String,
+    /// Flatpak add-ons installed with a `flatpak:` app, system-wide.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<String>,
+    /// Like `extra`, but only on a computer with an AMD graphics card
+    /// (checked at the first start).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_amd: Vec<String>,
 }
 
 /// The list, in the order the page shows it.
@@ -106,6 +113,13 @@ mod tests {
                 _ => false,
             };
             assert!(ok, "{a:?}");
+            // Add-ons belong to a Flatpak app, and are Flatpak ids too.
+            for r in a.extra.iter().chain(&a.extra_amd) {
+                assert!(
+                    a.install.starts_with("flatpak:") && word(r) && r.contains('.'),
+                    "{a:?}"
+                );
+            }
             // A mise tool needs mise, which comes first on the list.
             if a.install.starts_with("mise:") {
                 assert!(c[..i].iter().any(|b| b.install == "mise"), "{a:?}");
@@ -125,6 +139,9 @@ mod tests {
                 ("alpaca", "flatpak:com.jeffser.Alpaca")
             ]
         );
+        let alpaca = find("alpaca").unwrap();
+        assert_eq!(alpaca.extra, ["com.jeffser.Alpaca.Plugins.Ollama"]);
+        assert_eq!(alpaca.extra_amd, ["com.jeffser.Alpaca.Plugins.AMD"]);
         // Both can be picked, with or without the other tools.
         let got = validate(&ids(&["alpaca", "firefox", "ollama", "mise"])).unwrap();
         assert_eq!(

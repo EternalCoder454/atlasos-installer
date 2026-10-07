@@ -6,5 +6,5 @@
   {"id": "debug", "group": "developer", "name": "Debugging tools", "summary": "gdb, strace and perf, in a toolbox", "install": "toolbox:gdb strace perf"},
   {"id": "vscode", "group": "developer", "name": "Visual Studio Code", "summary": "Microsoft's code editor", "install": "flatpak:com.visualstudio.code"},
   {"id": "ollama", "group": "ai", "name": "Ollama", "summary": "Runs AI models on this computer, from the terminal", "install": "mise:ollama"},
-  {"id": "alpaca", "group": "ai", "name": "Alpaca", "summary": "A chat app for the AI models on this computer", "install": "flatpak:com.jeffser.Alpaca"}
+  {"id": "alpaca", "group": "ai", "name": "Alpaca", "summary": "A chat app with its own local AI engine built in", "install": "flatpak:com.jeffser.Alpaca", "extra": ["com.jeffser.Alpaca.Plugins.Ollama"], "extra_amd": ["com.jeffser.Alpaca.Plugins.AMD"]}
 ]

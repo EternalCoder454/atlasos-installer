@@ -39,12 +39,19 @@ pinned and hashed. To bump mise, change `MISE_VERSION` and
 Two ordinary entries in the `ai` group, shown together on the apps page under
 a graphics-card warning: `ollama` (`mise:ollama`, the upstream release through
 mise's registry, whose main archive carries the CPU, NVIDIA CUDA and Vulkan
-backends) and `alpaca`
-(`flatpak:com.jeffser.Alpaca`, a chat app that is an Ollama client). Nothing
-pulls a model: they are several GB each, so the user runs `ollama pull` (or
-pulls from Alpaca) later. Nothing starts the Ollama server, so `ollama serve`
-runs when it is wanted. The archive mise fetches has no AMD ROCm backend (upstream
-ships it as a separate download); AMD cards use the Vulkan one.
+backends) and `alpaca` (`flatpak:com.jeffser.Alpaca`, a chat app).
+
+A `flatpak:` entry may list add-ons, installed system-wide right after the app
+(if one fails the whole entry is retried): `extra` always, `extra_amd` only when
+the first-start script finds an AMD display controller (PCI vendor 0x1002,
+class 0x03, in `/sys/bus/pci/devices`). Alpaca uses both:
+`com.jeffser.Alpaca.Plugins.Ollama` (Alpaca runs and manages its own Ollama
+server, so no service is needed) and `com.jeffser.Alpaca.Plugins.AMD` (ROCm).
+
+Nothing pulls a model: they are several GB each, so the user pulls them from
+Alpaca (or `ollama pull`) later. The standalone `ollama` CLI still needs
+`ollama serve`, and the archive mise fetches has no AMD ROCm backend (upstream
+ships it separately); AMD cards use its Vulkan one.
 
 ## Tests
 

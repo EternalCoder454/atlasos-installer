@@ -64,7 +64,7 @@ class Base(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         for k, v in dict(RECORD=self.record, STATUS=self.status, CATALOG=CATALOG,
-                         STATE_DIR=self.state, BIN_DIR=self.home / "bin", OS_RELEASE=t / "os-release",
+                         STATE_DIR=self.state, BIN_DIR=self.home / "bin", OS_RELEASE=t / "os-release", PCI_DEVICES=t / "no-pci",
                          RUNTIME_DIR=self.run_dir, REQUIRE_ROOT=False, CHECK_OWNER=False,
                          MISE_SHA256=hashlib.sha256(MISE_BODY.encode()).hexdigest()).items():
             q = mock.patch.object(fba, k, v)
@@ -100,12 +100,56 @@ class SystemMode(Base):
         self.assertTrue(self.calls("flatpak install --system -y --noninteractive flathub org.mozilla.firefox"))
         self.assertEqual(self.st()["state"], "done")
 
-    def test_local_ai_chat_app_is_a_system_flatpak_and_ollama_waits_for_the_account(self):
+    def pci(self, *devices):
+        """A fake /sys/bus/pci/devices with (vendor, class) pairs."""
+        root = Path(self.tmp.name) / "pci"
+        for n, (vendor, cls) in enumerate(devices):
+            d = root / ("0000:00:%02x.0" % n)
+            d.mkdir(parents=True)
+            (d / "vendor").write_text(vendor + "\n")
+            (d / "class").write_text(cls + "\n")
+        root.mkdir(exist_ok=True)
+        q = mock.patch.object(fba, "PCI_DEVICES", root)
+        q.start()
+        self.addCleanup(q.stop)
+
+    def alpaca_refs(self):
+        return [c.rsplit(" ", 1)[1] for c in self.calls("flatpak install")]
+
+    def test_alpaca_comes_with_its_own_ollama_engine(self):
+        self.pci(("0x10de", "0x030000"))  # NVIDIA: no AMD add-on
         self.write_record(["ollama", "alpaca"])
         self.assertEqual(self.run_mode("system"), 0)
-        self.assertTrue(self.calls("flatpak install --system -y --noninteractive flathub com.jeffser.Alpaca"))
-        self.assertEqual(self.rec_apps(), ["ollama"])
-        self.assertEqual(self.calls("mise"), [])  # no model or tool is fetched by the system part
+        self.assertEqual(self.alpaca_refs(), ["com.jeffser.Alpaca", "com.jeffser.Alpaca.Plugins.Ollama"])
+        self.assertEqual(self.rec_apps(), ["ollama"])  # the mise tool waits for the account
+        self.assertEqual(self.calls("mise"), [])
+
+    def test_alpaca_adds_the_amd_plugin_on_an_amd_gpu(self):
+        self.pci(("0x8086", "0x060000"), ("0x1002", "0x030000"))
+        self.write_record(["alpaca"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.alpaca_refs(), ["com.jeffser.Alpaca", "com.jeffser.Alpaca.Plugins.Ollama",
+                                              "com.jeffser.Alpaca.Plugins.AMD"])
+        self.assertFalse(self.record.exists())
+
+    def test_an_amd_device_that_is_not_a_display_does_not_count(self):
+        self.pci(("0x1002", "0x040300"))  # AMD audio, no GPU
+        self.write_record(["alpaca"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertNotIn("com.jeffser.Alpaca.Plugins.AMD", self.alpaca_refs())
+
+    def test_a_missing_sysfs_means_no_amd_plugin(self):
+        # (setUp already points PCI_DEVICES at a directory that does not exist)
+        self.write_record(["alpaca"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.alpaca_refs(), ["com.jeffser.Alpaca", "com.jeffser.Alpaca.Plugins.Ollama"])
+
+    def test_a_failed_addon_keeps_the_app_for_a_retry(self):
+        self.pci(("0x1002", "0x030000"))
+        self.write_record(["alpaca"])
+        self.assertEqual(self.run_mode("system", FAIL_MATCH="Plugins.AMD"), 1)
+        self.assertEqual(self.rec_apps(), ["alpaca"])
+        self.assertEqual(self.st()["failed"], ["alpaca"])
 
     def test_success_deletes_record_when_nothing_left(self):
         self.write_record(["firefox", "brave"])
