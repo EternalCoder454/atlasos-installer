@@ -1,7 +1,7 @@
 [package]
-name = "atlas-installer"
-description = "Atlas Installer: the AtlasOS installer UI (Kirigami over CXX-Qt)"
-version = "0.1.0"
+name = "telamon-installer"
+description = "Telamon Installer: the Telamon OS installer UI (Kirigami over CXX-Qt)"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/EternalCoder454/atlasos-installer"
@@ -14,7 +14,7 @@ build = "build.rs"
 # CMake (Corrosion) links the static library into the C++ executable.
 # `rlib` is there so `cargo test` and `cargo clippy` work as usual.
 [lib]
-name = "atlas_installer"
+name = "telamon_installer"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]

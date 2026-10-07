@@ -3,11 +3,11 @@
 # app/dev.sh builds it:
 #
 #   podman build --build-context atlas-framework=<atlas-framework checkout> \
-#     -t localhost/atlas-installer-dev:telamon-ui -f app/Containerfile.telamon-ui app
+#     -t localhost/telamon-installer-dev:telamon-ui -f app/Containerfile.telamon-ui app
 #
-# The ISO build uses the Telamon.Ui of the AtlasOS image instead
+# The ISO build uses the Telamon.Ui of the Telamon OS image instead
 # (iso/Containerfile.telamon-ui).
-FROM localhost/atlas-installer-dev
+FROM localhost/telamon-installer-dev
 # Telamon.Ui's own build dependencies
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf -y -q --setopt=keepcache=1 --setopt=install_weak_deps=False install \
@@ -26,6 +26,6 @@ RUN --mount=type=cache,target=/var/cache/telamon-ui-build,sharing=locked \
         && printf '%s\n' "$toolchain" >/var/cache/telamon-ui-build/.toolchain; \
     fi \
     && cmake -S /atlas-framework -B /var/cache/telamon-ui-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr -DATLAS_BUILD_GALLERY=OFF >/dev/null \
+        -DCMAKE_INSTALL_PREFIX=/usr -DTELAMON_BUILD_GALLERY=OFF >/dev/null \
     && cmake --build /var/cache/telamon-ui-build \
     && cmake --install /var/cache/telamon-ui-build >/dev/null

@@ -1,6 +1,9 @@
 [Unit]
-Description=Add your chosen AtlasOS apps (developer tools)
+Description=Add your chosen Telamon OS apps (developer tools)
 # Runs when the record has per-account apps, or when a result is waiting to be shown.
+# (the record and the status each under the new name and under the old one)
+ConditionPathExists=|/var/lib/telamon/first-boot-apps.json
+ConditionPathExists=|/var/lib/telamon/first-boot-apps.status
 ConditionPathExists=|/var/lib/atlasos/first-boot-apps.json
 ConditionPathExists=|/var/lib/atlasos/first-boot-apps.status
 # Run beside the session, not as part of starting it: a target waits for the
@@ -10,7 +13,7 @@ After=graphical-session.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/atlasos/atlas-first-boot-apps user
+ExecStart=/usr/libexec/telamon/telamon-first-boot-apps user
 TimeoutStartSec=6h
 Restart=on-failure
 RestartSec=60

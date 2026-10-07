@@ -32,7 +32,7 @@ InstallerPage {
     onOpenChanged: page.syncNetworks()
 
     title: qsTr("Connect to Wi-Fi")
-    subtitle: page.connected ? qsTr("AtlasOS will connect to %1 after it starts.").arg(page.wifi.activeSsid) : qsTr("Connect now so AtlasOS can finish setting up after it starts. You can also do this later: the install itself needs no internet.")
+    subtitle: page.connected ? qsTr("Telamon OS will connect to %1 after it starts.").arg(page.wifi.activeSsid) : qsTr("Connect now so Telamon OS can finish setting up after it starts. You can also do this later: the install itself needs no internet.")
     primaryText: page.connected ? qsTr("Continue") : qsTr("Set Up Later")
     primaryEnabled: page.connecting.length === 0
     onPrimary: page.app.next()

@@ -1,5 +1,0 @@
-[D-BUS Service]
-Name=net.eterneon.atlas.InstallerHelper
-Exec=/bin/false
-User=root
-SystemdService=atlas-installer-helper.service

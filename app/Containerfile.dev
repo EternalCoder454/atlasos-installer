@@ -1,7 +1,7 @@
 # Build and test environment for the installer UI (app/). Fedora 44, with
-# the same Qt and Kirigami versions as the AtlasOS image the live ISO runs.
+# the same Qt and Kirigami versions as the Telamon OS image the live ISO runs.
 #
-#   podman build -t localhost/atlas-installer-dev -f app/Containerfile.dev app
+#   podman build -t localhost/telamon-installer-dev -f app/Containerfile.dev app
 #
 # app/dev.sh builds it on first use and runs commands in it.
 FROM registry.fedoraproject.org/fedora:44

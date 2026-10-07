@@ -14,8 +14,8 @@ use zbus::zvariant::Value;
 use crate::install::{self, Env, Request};
 use crate::run::{self, Runner, lock};
 
-pub const BUS_NAME: &str = "net.eterneon.atlas.InstallerHelper";
-pub const OBJECT_PATH: &str = "/net/eterneon/atlas/InstallerHelper";
+pub const BUS_NAME: &str = "net.eterneon.telamon.InstallerHelper";
+pub const OBJECT_PATH: &str = "/net/eterneon/telamon/InstallerHelper";
 
 /// Exit after this long with no calls.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -23,9 +23,9 @@ pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const POLKIT_ALLOW_USER_INTERACTION: u32 = 1;
 
 pub mod action {
-    pub const LIST_DISKS: &str = "net.eterneon.atlas.installer.list-disks";
-    pub const INSTALL: &str = "net.eterneon.atlas.installer.install";
-    pub const REBOOT: &str = "net.eterneon.atlas.installer.reboot";
+    pub const LIST_DISKS: &str = "net.eterneon.telamon.installer.list-disks";
+    pub const INSTALL: &str = "net.eterneon.telamon.installer.install";
+    pub const REBOOT: &str = "net.eterneon.telamon.installer.reboot";
 }
 
 /// What Status reports. `result` is the Install JSON once it is done; it
@@ -69,10 +69,10 @@ impl Status {
     }
 }
 
-/// Errors returned over D-Bus as `net.eterneon.atlas.Error.*` (the same
+/// Errors returned over D-Bus as `net.eterneon.telamon.Error.*` (the same
 /// names as Atlas Updater's helper).
 #[derive(Debug, zbus::DBusError)]
-#[zbus(prefix = "net.eterneon.atlas.Error")]
+#[zbus(prefix = "net.eterneon.telamon.Error")]
 pub enum HelperError {
     #[zbus(error)]
     ZBus(zbus::Error),
@@ -126,8 +126,8 @@ async fn block_shutdown(conn: &zbus::Connection) -> Option<zbus::zvariant::Owned
     match login
         .inhibit(
             "shutdown:sleep:idle",
-            "AtlasOS Installer",
-            "AtlasOS is being installed",
+            "Telamon OS Installer",
+            "Telamon OS is being installed",
             "block",
         )
         .await
@@ -236,7 +236,7 @@ pub struct Service {
 /// being asked gets to see.
 const SECRETS: [&str; 2] = ["mok_password", "recovery_key"];
 const SHUTTING_DOWN: &str = "the helper is shutting down, try again";
-const BUSY: &str = "AtlasOS is being installed, or the computer is restarting";
+const BUSY: &str = "Telamon OS is being installed, or the computer is restarting";
 
 impl Service {
     pub fn new(runner: Arc<dyn Runner>, env: Env) -> Service {
@@ -342,7 +342,7 @@ impl Service {
         // password) would be lost, and the system is installed.
         if lock(&self.status).state == "done" {
             return Err(HelperError::Busy(
-                "AtlasOS is already installed: restart the computer".into(),
+                "Telamon OS is already installed: restart the computer".into(),
             ));
         }
         // from here the helper must stay up: it holds the install's result
@@ -466,7 +466,7 @@ impl Service {
     }
 }
 
-#[zbus::interface(name = "net.eterneon.atlas.InstallerHelper1")]
+#[zbus::interface(name = "net.eterneon.telamon.InstallerHelper1")]
 impl Service {
     /// JSON: `{"disks": [...], "hidden": [...], "tpm2": bool}` (installer-core's
     /// DiskList, and whether a usable TPM 2.0 exists).

@@ -24,7 +24,7 @@ use crate::run::{self, Cmd, Output, Runner, bin, lock, run};
 
 const SECURE_BOOT_VAR: &str =
     "sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c";
-/// The AtlasOS module signing key; only the NVIDIA image has it.
+/// The Telamon OS module signing key; only the NVIDIA image has it.
 const NVIDIA_KEY: &str = "usr/share/atlasos/nvidia/atlasos-module-signing.der";
 const KBD_MODEL_MAP: &str = "usr/share/systemd/kbd-model-map";
 const NM_DIRS: [&str; 2] = [
@@ -44,7 +44,7 @@ const TPM_DEVICE: &str = "dev/tpmrm0";
 const TPM_EVENT_LOG: &str = "sys/kernel/security/tpm0/binary_bios_measurements";
 /// Where the new system keeps the install log and the TPM event log (the
 /// live system's copies are gone at the restart).
-const SAVED_LOGS: &str = "var/log/atlas-installer";
+const SAVED_LOGS: &str = "var/log/telamon-installer";
 /// The disk's temporary key lives in this directory of the run dir (0700).
 const KEY_DIR: &str = "luks";
 const KEY_FILE: &str = "luks-key";
@@ -66,8 +66,8 @@ impl Env {
     pub fn system() -> Env {
         Env {
             root: "/".into(),
-            target: "/run/atlas-target".into(),
-            run_dir: "/run/atlas-installer".into(),
+            target: "/run/telamon-target".into(),
+            run_dir: "/run/telamon-installer".into(),
         }
     }
 
@@ -440,7 +440,7 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
     let probe = probe(r, env)?;
     if probe.live_sources.is_empty() {
         return Err(
-            "The installer's boot media was not found, so it can't tell which disk to leave alone. Start the computer from the AtlasOS installer."
+            "The installer's boot media was not found, so it can't tell which disk to leave alone. Start the computer from the Telamon OS installer."
                 .into(),
         );
     }
@@ -1189,7 +1189,7 @@ pub fn describe(p: &Prepared, req: &Request, env: &Env) -> String {
         p.wifi.as_ref().map_or("none".to_string(), |w| w.0.clone()),
     ));
     if p.windows_esps.is_empty() {
-        s.push_str("boot menu: AtlasOS only\n");
+        s.push_str("boot menu: Telamon OS only\n");
     } else {
         s.push_str(&format!(
             "boot menu: Windows on {}\n",
@@ -1665,7 +1665,7 @@ fn place(base: &Path, rel: &str, entry: Entry, private: bool) -> Result<Vec<Path
     }
     // A temporary name beside the file, created new (never an existing
     // file or link), then renamed over the final name.
-    let tmp = format!(".{name}.atlas-tmp-{}", std::process::id());
+    let tmp = format!(".{name}.telamon-tmp-{}", std::process::id());
     // a leftover of a crashed run is removed (a link is unlinked, not
     // followed) before one more try
     fn once_more<T>(
@@ -1806,15 +1806,22 @@ fn save_apps(
             deploy.display()
         )));
     };
-    let rel = format!("var/{}", apps::RECORD);
-    let mut written =
-        write_file(stateroot, &rel, &apps::record(chosen), 0o644).map_err(AppsError::NotSaved)?;
-    // Each account's first login reads it: open whatever the umask.
-    for dir in &written {
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o755))
-            .map_err(|e| AppsError::NotSaved(format!("cannot open up {}: {e}", dir.display())))?;
+    // Under both names: the image decides which first-start script runs, and
+    // an image built before the rename has the one that reads the old path.
+    let mut written = Vec::new();
+    for record in [apps::RECORD, apps::LEGACY_RECORD] {
+        let rel = format!("var/{record}");
+        let dirs = write_file(stateroot, &rel, &apps::record(chosen), 0o644)
+            .map_err(AppsError::NotSaved)?;
+        // Each account's first login reads it: open whatever the umask.
+        for dir in &dirs {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).map_err(|e| {
+                AppsError::NotSaved(format!("cannot open up {}: {e}", dir.display()))
+            })?;
+        }
+        written.extend(dirs);
+        written.push(stateroot.join(&rel));
     }
-    written.push(stateroot.join(&rel));
     let ids: Vec<&str> = chosen.iter().map(|a| a.id.as_str()).collect();
     log.note(&format!("# apps for the first start: {}", ids.join(" ")));
     relabel(r, deploy, stateroot, &written).map_err(AppsError::Label)
@@ -1980,7 +1987,7 @@ pub fn restart(r: &dyn Runner, env: &Env) -> Result<(), String> {
             Ok(_) => return Ok(()),
             // pulled since, or broken some other way
             Err(e) => eprintln!(
-                "atlas-installer-helper: systemctl reboot failed, restarting directly: {e}"
+                "telamon-installer-helper: systemctl reboot failed, restarting directly: {e}"
             ),
         }
     }
@@ -1999,9 +2006,9 @@ pub fn restart(r: &dyn Runner, env: &Env) -> Result<(), String> {
     r.restart_now(&under)
 }
 
-/// Replace bootupd's "Fedora" firmware entry for our ESP with "AtlasOS".
+/// Replace bootupd's "Fedora" firmware entry for our ESP with "Telamon OS".
 /// The new entry is made first, so a failure never leaves none. `Err`: no
-/// AtlasOS entry was made; `Ok` lists old entries that could not be removed.
+/// Telamon OS entry was made; `Ok` lists old entries that could not be removed.
 fn rename_boot_entry(r: &dyn Runner, plan: &Plan, after: &Table) -> Result<Vec<String>, String> {
     let partuuid = after
         .partition(&plan.esp)
@@ -2039,7 +2046,7 @@ fn rename_boot_entry(r: &dyn Runner, plan: &Plan, after: &Table) -> Result<Vec<S
     let mut warnings = Vec::new();
     // Creating the entry puts it first in the boot order, but some firmware
     // still starts a USB stick first while one is plugged in. BootNext wins
-    // over both, once, so the restart reaches AtlasOS even with the stick
+    // over both, once, so the restart reaches Telamon OS even with the stick
     // left in. The new entry is the first in the order (efibootmgr may also
     // have reused an old one: then that one is kept, below).
     let new = run(r, Cmd::new(bin::EFIBOOTMGR, Vec::<String>::new()))
@@ -2062,7 +2069,7 @@ fn rename_boot_entry(r: &dyn Runner, plan: &Plan, after: &Table) -> Result<Vec<S
     };
     if let Err(e) = next {
         warnings.push(format!(
-            "The firmware wasn't told to start AtlasOS next, so take out the USB stick or disc before the computer restarts: {e}"
+            "The firmware wasn't told to start Telamon OS next, so take out the USB stick or disc before the computer restarts: {e}"
         ));
     }
     for num in old.into_iter().filter(|num| Some(num) != new.as_ref()) {
@@ -2074,7 +2081,7 @@ fn rename_boot_entry(r: &dyn Runner, plan: &Plan, after: &Table) -> Result<Vec<S
             ),
         ) {
             warnings.push(format!(
-                "The old firmware boot entry Boot{num} could not be removed, so the boot menu lists AtlasOS twice: {e}"
+                "The old firmware boot entry Boot{num} could not be removed, so the boot menu lists Telamon OS twice: {e}"
             ));
         }
     }
@@ -2302,6 +2309,17 @@ fn execute(
             0o644,
         ),
         (
+            "etc/telamon/installer.ini".to_string(),
+            settings::installer_ini(
+                &req.locale,
+                &req.keymap,
+                p.wifi.is_some() || on_cable(env, log),
+            ),
+            0o644,
+        ),
+        // Where Atlas Installer put it, for the first-run wizard of an image
+        // built before the rename (the new wizard reads either).
+        (
             "etc/atlasos/installer.ini".to_string(),
             settings::installer_ini(
                 &req.locale,
@@ -2337,7 +2355,7 @@ fn execute(
         written.push(deploy.join(rel));
     }
     if seal.is_some() {
-        // /etc/atlas-installer is 0700: the PIN is in it
+        // /etc/telamon-installer is 0700: the PIN is in it
         let mut private = vec![(crypt::SEAL_MARKER, crypt::SEAL_MARKER_TEXT)];
         if req.encryption == Encryption::TpmPin {
             private.push((crypt::SEAL_PIN, req.password.as_str()));
@@ -2419,7 +2437,7 @@ fn execute(
             "The apps you picked could not be saved for the first start ({e}). Add them from Discover after restarting."
         )),
         Err(AppsError::Label(e)) => warnings.push(format!(
-            "The list of apps to add at the first start may have the wrong SELinux label ({e}). After restarting, run sudo restorecon -R /var/lib/atlasos."
+            "The list of apps to add at the first start may have the wrong SELinux label ({e}). After restarting, run sudo restorecon -R /var/lib/telamon /var/lib/atlasos."
         )),
     }
     save_logs(r, env, log, &deploy);

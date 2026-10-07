@@ -7,7 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
 /// Where the choices go in the new system (under its `/var`), root-owned.
-pub const RECORD: &str = "lib/atlasos/first-boot-apps.json";
+pub const RECORD: &str = "lib/telamon/first-boot-apps.json";
+/// Where they went until the rename (Atlas Installer, and the first-start
+/// script of an image built before it): written too, with the same content,
+/// for one release. The new first-start script reads either, and removes
+/// both when it is done.
+pub const LEGACY_RECORD: &str = "lib/atlasos/first-boot-apps.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]

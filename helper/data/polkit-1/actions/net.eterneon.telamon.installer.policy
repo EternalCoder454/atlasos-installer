@@ -5,9 +5,9 @@
   <vendor>Eterneon</vendor>
   <vendor_url>https://github.com/EternalCoder454/atlasos-installer</vendor_url>
 
-  <action id="net.eterneon.atlas.installer.list-disks">
-    <description>List the disks AtlasOS can be installed on</description>
-    <message>Authentication is required to list the disks AtlasOS can be installed on</message>
+  <action id="net.eterneon.telamon.installer.list-disks">
+    <description>List the disks Telamon OS can be installed on</description>
+    <message>Authentication is required to list the disks Telamon OS can be installed on</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
@@ -15,9 +15,9 @@
     </defaults>
   </action>
 
-  <action id="net.eterneon.atlas.installer.install">
-    <description>Install AtlasOS</description>
-    <message>Authentication is required to install AtlasOS, which changes the partitions on a disk</message>
+  <action id="net.eterneon.telamon.installer.install">
+    <description>Install Telamon OS</description>
+    <message>Authentication is required to install Telamon OS, which changes the partitions on a disk</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
@@ -25,8 +25,8 @@
     </defaults>
   </action>
 
-  <action id="net.eterneon.atlas.installer.reboot">
-    <description>Restart the computer after installing AtlasOS</description>
+  <action id="net.eterneon.telamon.installer.reboot">
+    <description>Restart the computer after installing Telamon OS</description>
     <message>Authentication is required to restart the computer</message>
     <defaults>
       <allow_any>no</allow_any>

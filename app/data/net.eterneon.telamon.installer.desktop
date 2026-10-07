@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Install Telamon OS
+Comment=Install Telamon OS on this computer
+Exec=telamon-installer
+Icon=net.eterneon.telamon.installer
+Categories=System;
+Keywords=install;installer;setup;
+NoDisplay=false

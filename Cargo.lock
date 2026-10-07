@@ -37,21 +37,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atlas-installer-helper"
-version = "0.1.0"
-dependencies = [
- "getrandom 0.3.4",
- "installer-core",
- "libc",
- "rustix",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "zbus",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -240,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "installer-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -487,6 +472,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "telamon-installer-helper"
+version = "0.2.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "installer-core",
+ "libc",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]

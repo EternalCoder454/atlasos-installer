@@ -1,11 +1,11 @@
-//! `atlas-installer-helper`: the root half of Atlas Installer. Started by
-//! D-Bus on the system bus (`net.eterneon.atlas.InstallerHelper`); polkit
+//! `telamon-installer-helper`: the root half of Telamon Installer. Started by
+//! D-Bus on the system bus (`net.eterneon.telamon.InstallerHelper`); polkit
 //! decides who may list disks, install and restart.
 //!
 //! For testing in the live session, as root:
 //!
-//!     atlas-installer-helper --list
-//!     atlas-installer-helper --plan <disk> erase|free-space [locale] [keymap] [wifi-uuid]
+//!     telamon-installer-helper --list
+//!     telamon-installer-helper --plan <disk> erase|free-space [locale] [keymap] [wifi-uuid]
 //!
 //! `--list` prints what ListDisks returns; `--plan` prints what Install
 //! would do. Neither writes to any disk (EFI partitions are mounted
@@ -22,10 +22,10 @@ use install::{Env, Request};
 use run::SystemRunner;
 use service::{IDLE_TIMEOUT, Service, serve};
 
-const USAGE: &str = "usage: atlas-installer-helper [--list | --plan <disk> erase|free-space [locale] [keymap] [wifi-uuid] [none|tpm|tpm-pin|password]]";
+const USAGE: &str = "usage: telamon-installer-helper [--list | --plan <disk> erase|free-space [locale] [keymap] [wifi-uuid] [none|tpm|tpm-pin|password]]";
 
 fn fail(e: impl std::fmt::Display) -> ExitCode {
-    eprintln!("atlas-installer-helper: {e}");
+    eprintln!("telamon-installer-helper: {e}");
     ExitCode::FAILURE
 }
 
@@ -64,21 +64,21 @@ async fn run() -> ExitCode {
             // SAFETY: PR_SET_DUMPABLE takes an integer flag
             if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
                 eprintln!(
-                    "atlas-installer-helper: WARNING: can't clear the dumpable flag, a crash may leave a core dump: {}",
+                    "telamon-installer-helper: WARNING: can't clear the dumpable flag, a crash may leave a core dump: {}",
                     std::io::Error::last_os_error()
                 );
             }
             // SAFETY: mlockall takes only flags
             if unsafe { libc::mlockall(libc::MCL_CURRENT) } != 0 {
                 eprintln!(
-                    "atlas-installer-helper: can't lock itself in memory: {}",
+                    "telamon-installer-helper: can't lock itself in memory: {}",
                     std::io::Error::last_os_error()
                 );
             }
             // SAFETY: as above
             if unsafe { libc::mlockall(libc::MCL_FUTURE | libc::MCL_ONFAULT) } != 0 {
                 eprintln!(
-                    "atlas-installer-helper: can't lock later memory: {}",
+                    "telamon-installer-helper: can't lock later memory: {}",
                     std::io::Error::last_os_error()
                 );
             }

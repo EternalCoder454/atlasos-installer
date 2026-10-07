@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 import org.kde.kirigami as Kirigami
 
-// The violet panel beside every page: the AtlasOS mark, a drawing for the
+// The violet panel beside every page: the Telamon OS mark, a drawing for the
 // current step, and the steps as quiet dots. Done steps can be clicked to
 // go back. Its colours are the brand's, not the theme's, so it looks the
 // same with any accent colour.
@@ -64,13 +64,13 @@ Rectangle {
             Kirigami.Icon {
                 implicitWidth: Kirigami.Units.iconSizes.medium
                 implicitHeight: Kirigami.Units.iconSizes.medium
-                source: "qrc:/qt/qml/net/eterneon/atlas/installer/data/atlasos-logo.svg"
+                source: "qrc:/qt/qml/net/eterneon/telamon/installer/data/atlasos-logo.svg"
                 isMask: true
                 color: panel.ink
                 Accessible.ignored: true
             }
             Text {
-                text: "AtlasOS"
+                text: "Telamon OS"
                 color: panel.ink
                 font.family: Kirigami.Theme.defaultFont.family
                 font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
@@ -96,7 +96,7 @@ Rectangle {
                     sourceSize.width: w * 2
                     sourceSize.height: w * 1.5
                     fillMode: Image.PreserveAspectFit
-                    source: "qrc:/qt/qml/net/eterneon/atlas/installer/data/art/" + art.modelData.key + ".svg"
+                    source: "qrc:/qt/qml/net/eterneon/telamon/installer/data/art/" + art.modelData.key + ".svg"
                     opacity: art.modelData.key === panel.current ? 1 : 0
                     visible: opacity > 0
                     scale: art.modelData.key === panel.current ? 1 : 0.96

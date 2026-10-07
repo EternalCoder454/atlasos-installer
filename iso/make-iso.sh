@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the AtlasOS live ISO, without root.
+# Builds the Telamon OS live ISO, without root.
 #
 #   iso/make-iso.sh [--local] [--verify-only] [-o FILE] [atlasos|atlasos-nvidia] [tag]
 #
@@ -119,7 +119,7 @@ if [ "$local" = 1 ]; then
 	echo ">> --local: the image is not signed, signature not checked"
 	# From here on the image is named by its ID, in case the tag moves.
 	base=$id
-	# Rechunked the way CI does before publishing (AtlasOS's `just rechunk`,
+	# Rechunked the way CI does before publishing (Telamon OS's `just rechunk`,
 	# with the same chunkah): a local build's own layers hold overlay
 	# whiteouts, which skopeo can't unpack in the rootless ISO builder, and
 	# the chunked layers have none. One copy, replaced when the local image
@@ -164,21 +164,21 @@ fi
 query=(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' qt6-qtbase qt6-qtdeclarative kf6-kirigami glibc)
 builds() { sort -u | tr '\n' ' '; }
 want=$(podman run --rm --pull=never --entrypoint rpm "$base" "${query[@]:1}" | builds)
-podman image exists localhost/atlas-installer-dev ||
-	podman build -q -t localhost/atlas-installer-dev -f app/Containerfile.dev app >/dev/null
-have=$(ATLAS_DEV_IMAGE=localhost/atlas-installer-dev app/dev.sh "${query[@]}" | builds)
-dev=localhost/atlas-installer-dev
+podman image exists localhost/telamon-installer-dev ||
+	podman build -q -t localhost/telamon-installer-dev -f app/Containerfile.dev app >/dev/null
+have=$(TELAMON_DEV_IMAGE=localhost/telamon-installer-dev app/dev.sh "${query[@]}" | builds)
+dev=localhost/telamon-installer-dev
 if [ "$have" != "$want" ]; then
 	echo ">> Pinning the build container to the image's builds: $want"
 	# Named by the builds and the dev container it starts from, so a rebuilt
 	# dev container gets a new copy.
-	from=$(podman image inspect --format '{{.Id}}' localhost/atlas-installer-dev)
-	dev=localhost/atlas-installer-dev:pinned-$(echo "$from $want" | sha256sum | cut -c1-12)
+	from=$(podman image inspect --format '{{.Id}}' localhost/telamon-installer-dev)
+	dev=localhost/telamon-installer-dev:pinned-$(echo "$from $want" | sha256sum | cut -c1-12)
 	podman image exists "$dev" ||
 		podman build -q -t "$dev" --build-arg PINS="$want" \
 			-f iso/Containerfile.pin iso >/dev/null
 	# dnf --allowerasing may have removed something rather than pin it.
-	have=$(ATLAS_DEV_IMAGE=$dev app/dev.sh "${query[@]}" | builds)
+	have=$(TELAMON_DEV_IMAGE=$dev app/dev.sh "${query[@]}" | builds)
 	[ "$have" = "$want" ] || {
 		echo "The pinned build container has $have, not $want." >&2
 		exit 1
@@ -188,17 +188,17 @@ fi
 # The installer builds against the installed Telamon.Ui: the image's own copy
 # (iso/Containerfile.telamon-ui), the one the live system runs it with.
 podman run --rm --pull=never --entrypoint test "$base" -f /usr/lib64/qt6/qml/Telamon/Ui/qmldir || {
-	echo "$base has no Telamon.Ui (telamon-ui): build it from an AtlasOS with atlas-framework" >&2
+	echo "$base has no Telamon.Ui (telamon-ui): build it from a Telamon OS with atlas-framework" >&2
 	exit 1
 }
 from=$(podman image inspect --format '{{.Id}}' "$dev")
-devui=localhost/atlas-installer-dev:iso-$(echo "$from $base" | sha256sum | cut -c1-12)
+devui=localhost/telamon-installer-dev:iso-$(echo "$from $base" | sha256sum | cut -c1-12)
 podman image exists "$devui" ||
 	podman build -q --pull=never -t "$devui" --build-arg DEV_IMAGE="$dev" --build-arg BASE_IMAGE="$base" \
 		-f iso/Containerfile.telamon-ui iso >/dev/null
 
 echo ">> Building the installer"
-ATLAS_DEV_IMAGE=$devui app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {
+TELAMON_DEV_IMAGE=$devui app/dev.sh live/stage-installer.sh >build/stage-installer.log 2>&1 || {
 	tail -30 build/stage-installer.log >&2
 	exit 1
 }
@@ -207,7 +207,7 @@ echo ">> Building the live image"
 podman build -q --pull=never --build-arg BASE_IMAGE="$base" \
 	-f live/Containerfile -t "localhost/$name-live:$short" . >/dev/null
 
-podman build -q -f iso/Containerfile.builder -t localhost/atlas-iso-builder iso >/dev/null
+podman build -q -f iso/Containerfile.builder -t localhost/telamon-iso-builder iso >/dev/null
 
 podman run --rm --privileged --security-opt label=disable \
 	--mount type=image,src="localhost/$name-live:$short",dst=/rootfs \
@@ -216,6 +216,6 @@ podman run --rm --privileged --security-opt label=disable \
 	-v "$(dirname "$out"):/out" \
 	-v "$PWD/iso/build-iso.sh:/build-iso.sh:ro" \
 	-e ISO_LABEL="$label" -e ISO_NAME="$(basename "$out")" -e PAYLOAD_REF="$repo:stable" \
-	localhost/atlas-iso-builder /build-iso.sh
+	localhost/telamon-iso-builder /build-iso.sh
 echo "$source" >"$out.image"
 echo ">> Wrote $out (installs $source)"

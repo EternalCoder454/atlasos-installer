@@ -14,7 +14,7 @@ step=${2:-welcome}
 flags=${3:-1}
 theme=${4:-light}
 wait=${5:-3}
-bin=${BIN:-build/app/atlas-installer}
+bin=${BIN:-build/app/telamon-installer}
 limit=${SHOT_TIMEOUT:-300}
 [[ $limit =~ ^[0-9]+$ ]] || {
 	echo "screenshot.sh: SHOT_TIMEOUT must be a number of seconds" >&2
@@ -45,7 +45,7 @@ if [ "${ATLAS:-0}" = 1 ]; then
 </fontconfig>
 FC
 fi
-# ICONS names another icon theme, such as Papirus-Dark, AtlasOS's own (the
+# ICONS names another icon theme, such as Papirus-Dark, Telamon OS's own (the
 # container has only Breeze: install papirus-icon-theme in it first).
 printf '\n[Icons]\nTheme=%s\n' "${ICONS:-breeze$([ "$theme" = dark ] && echo -dark)}" >>"$tmp/config/kdeglobals"
 
@@ -55,7 +55,7 @@ set -e
 "$bin" &
 app=\$!
 sleep "$wait"
-w=\$(timeout 60 xdotool search --sync --onlyvisible --name "Install AtlasOS" | head -1)
+w=\$(timeout 60 xdotool search --sync --onlyvisible --name "Install Telamon OS" | head -1)
 if [ -z "\$w" ]; then
 	echo "screenshot.sh: no installer window after 60 s" >&2
 	kill \$app 2>/dev/null || true
@@ -73,6 +73,6 @@ chmod +x "$tmp/run.sh"
 env XDG_CONFIG_HOME="$tmp/config" XDG_DATA_HOME="$tmp/data" \
     XDG_CACHE_HOME="$tmp/cache" XDG_RUNTIME_DIR="$tmp/runtime" \
     QT_QPA_PLATFORM=xcb QT_SCALE_FACTOR="${SCALE:-1}" \
-    ATLAS_INSTALLER_DEMO="$flags" ATLAS_INSTALLER_DEMO_PAGE="$step" \
+    TELAMON_INSTALLER_DEMO="$flags" TELAMON_INSTALLER_DEMO_PAGE="$step" \
     timeout -k 10 "$limit" \
     dbus-run-session -- xvfb-run -a -s "-screen 0 2560x1600x24" "$tmp/run.sh"

@@ -18,7 +18,7 @@ InstallerPage {
     readonly property var disk: page.app.disk
     readonly property bool modeOk: page.disk !== null && (page.app.mode === "erase" && page.disk.eraseOk || page.app.mode === "free-space" && page.disk.freeOk)
 
-    title: qsTr("Where should AtlasOS go?")
+    title: qsTr("Where should Telamon OS go?")
     subtitle: qsTr("Choose a disk, then how to install on it.")
     primaryEnabled: page.diskState === "ready" && page.modeOk && page.app.encryptionReady
     onPrimary: page.app.next()
@@ -108,7 +108,7 @@ InstallerPage {
                 iconName: page.diskState === "error" ? "window-close-symbolic" : "drive-harddisk-symbolic"
                 tint: page.diskState === "error" ? Kirigami.Theme.negativeTextColor : TelamonStyle.accent
                 headline: page.diskState === "error" ? qsTr("Couldn't read the disks") : qsTr("No disk found")
-                subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("AtlasOS needs a disk of at least %1. Connect one, then look again.").arg(page.backend.minDiskSize)
+                subtitle: page.diskState === "error" ? page.backend.disksError : qsTr("Telamon OS needs a disk of at least %1. Connect one, then look again.").arg(page.backend.minDiskSize)
                 SecondaryButton {
                     text: qsTr("Look Again")
                     onClicked: page.backend.refreshDisks()
@@ -190,7 +190,7 @@ InstallerPage {
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.largeSpacing
                     visible: page.app.mode === ""
-                    text: qsTr("Choose how to install AtlasOS on this disk.")
+                    text: qsTr("Choose how to install Telamon OS on this disk.")
                     wrapMode: Text.Wrap
                     opacity: 0.65
                 }
@@ -206,12 +206,12 @@ InstallerPage {
                 id: encryptionSection
                 visible: page.diskState === "ready" && page.disk !== null && page.app.mode !== ""
                 title: qsTr("Encryption")
-                footer: page.app.encryption === "none" ? "" : qsTr("At start-up and when AtlasOS asks for the recovery key, you type with the keyboard layout you chose earlier.")
+                footer: page.app.encryption === "none" ? "" : qsTr("At start-up and when Telamon OS asks for the recovery key, you type with the keyboard layout you chose earlier.")
 
                 SectionRow {
                     iconName: "lock"
                     title: qsTr("Encrypt this disk")
-                    subtitle: page.backend.tpm2 ? qsTr("AtlasOS unlocks the disk by itself when this PC starts. Your files stay unreadable if the disk is taken out of this PC, or if the PC is sold or recycled. You'll get a recovery key at the end.") : qsTr("This PC has no security chip (TPM 2.0), so you'd type a password every time it starts.")
+                    subtitle: page.backend.tpm2 ? qsTr("Telamon OS unlocks the disk by itself when this PC starts. Your files stay unreadable if the disk is taken out of this PC, or if the PC is sold or recycled. You'll get a recovery key at the end.") : qsTr("This PC has no security chip (TPM 2.0), so you'd type a password every time it starts.")
                     showSwitch: true
                     switchChecked: page.app.encrypt
                     onSwitchToggled: checked => page.app.encryptChoice = checked ? "on" : "off"
@@ -221,7 +221,7 @@ InstallerPage {
                     visible: page.backend.tpm2 && page.app.encrypt
                     iconName: "input-dialpad-symbolic"
                     title: qsTr("Ask for a PIN when this PC starts")
-                    subtitle: qsTr("Protects your files if the whole PC is stolen: nobody can start AtlasOS without the PIN.")
+                    subtitle: qsTr("Protects your files if the whole PC is stolen: nobody can start Telamon OS without the PIN.")
                     showSwitch: true
                     switchChecked: page.app.encryptPin
                     onSwitchToggled: checked => page.app.pinChoice = checked ? "on" : "off"

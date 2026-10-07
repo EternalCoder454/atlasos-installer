@@ -67,11 +67,11 @@ pub fn user_cfg(hash: &str) -> Result<String, String> {
 }
 
 /// The file for the EFI partitions (by FAT volume ID) that hold Windows Boot
-/// Manager. AtlasOS shows the menu for 1 s (`grub-static-pre.cfg`); with
+/// Manager. Telamon OS shows the menu for 1 s (`grub-static-pre.cfg`); with
 /// Windows beside it the menu stays 5 s, so Windows is easy to reach.
 pub fn custom_cfg(windows_esps: &[String]) -> Result<String, String> {
     let mut s = String::from(
-        "# Written by Atlas Installer: Windows in the boot menu.\n\
+        "# Written by Telamon Installer: Windows in the boot menu.\n\
          set timeout=5\n\
          set timeout_style=menu\n",
     );

@@ -1,9 +1,9 @@
-# Atlas Installer
+# Telamon Installer
 
 The installer for [AtlasOS](https://github.com/EternalCoder454/AtlasOS), a
 bootc system based on Fedora 44 with KDE Plasma. It replaces the Anaconda ISO.
 
-The ISO is a live session of AtlasOS itself, built from the published image.
+The ISO is a live session of Telamon OS itself, built from the published image.
 It boots straight into the installer, which copies the image that is on the
 ISO to the disk with `bootc install`. No internet connection is needed. The
 installed system tracks `ghcr.io/eternalcoder454/atlasos:stable`, and its
@@ -21,7 +21,7 @@ first update downloads only the layers that changed since the ISO was built.
   Windows, its partitions and its boot loader are left exactly as they were,
   and Windows gets an entry in the boot menu.
 - **Progress, then restart.** You create your account after the restart,
-  in AtlasOS's own first-boot setup.
+  in Telamon OS's own first-boot setup.
 
 The installer never lists the USB stick or CD it was started from, and greys
 out disks smaller than 40 GB.
@@ -84,15 +84,15 @@ ISO file through another boot menu: that boot loader is recorded in PCR 7
 during the install, and the installed system's own boot never matches it.
 So the installer doesn't seal the key to PCR 7 itself. It leaves a TPM key
 with no PCR policy, and the installed system's first start replaces it with
-one bound to its own PCR 7 (`atlas-tpm-seal.service`, which then stops
+one bound to its own PCR 7 (`telamon-tpm-seal.service`, which then stops
 running). Until that first start, the TPM unlocks the disk for any system
 started on the PC; with a PIN, the PIN is still needed. If the seal fails,
-it tries again at every start, and `systemctl status atlas-tpm-seal` says
+it tries again at every start, and `systemctl status telamon-tpm-seal` says
 why. Someone who unlocked the disk before the seal keeps its key, so keep
 the PC with you until its first start.
 
 The installed system keeps the install log and the live session's TPM event
-log in `/var/log/atlas-installer/`.
+log in `/var/log/telamon-installer/`.
 
 ## Requirements
 
@@ -111,7 +111,7 @@ iso/make-iso.sh                  # from the published :stable, to build/atlasos.
 iso/make-iso.sh --local          # from this machine's localhost/atlasos:latest
 ```
 
-From the AtlasOS repository, `just iso` and `just iso-local` run the same
+From the Telamon OS repository, `just iso` and `just iso-local` run the same
 script.
 
 Write the ISO to a USB stick with Fedora Media Writer or `dd`, or boot it in a

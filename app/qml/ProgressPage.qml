@@ -42,7 +42,7 @@ InstallerPage {
             font.pointSize: Kirigami.Theme.defaultFont.pointSize * 2.1
             font.weight: Font.DemiBold
             font.letterSpacing: -0.2
-            text: qsTr("Installing AtlasOS")
+            text: qsTr("Installing Telamon OS")
             textFormat: Text.PlainText
             Accessible.role: Accessible.Heading
         }
@@ -87,7 +87,7 @@ InstallerPage {
         StatusHero {
             iconName: "window-close-symbolic"
             tint: Kirigami.Theme.negativeTextColor
-            headline: page.failed ? qsTr("AtlasOS couldn't be installed") : ""
+            headline: page.failed ? qsTr("Telamon OS couldn't be installed") : ""
             subtitle: page.backend.installError
         }
         QQC2.Label {
@@ -95,12 +95,12 @@ InstallerPage {
             // No log when the helper never started (polkit said no); the
             // helper's message usually names the log already.
             visible: page.backend.installBegan
-                     && page.backend.installError.indexOf("/run/atlas-installer/") < 0
+                     && page.backend.installError.indexOf("/run/telamon-installer/") < 0
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             opacity: 0.6
             font: Kirigami.Theme.smallFont
-            text: qsTr("The install log is at /run/atlas-installer/install.log until the computer restarts.")
+            text: qsTr("The install log is at /run/telamon-installer/install.log until the computer restarts.")
         }
         InfoBanner {
             Layout.fillWidth: true

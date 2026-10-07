@@ -18,7 +18,7 @@ QQC2.ApplicationWindow {
     readonly property bool demoHidden: root.demoPage === "wifi-hidden" || root.demoHiddenKept
     property bool demoHiddenKept: false
 
-    title: qsTr("Install AtlasOS")
+    title: qsTr("Install Telamon OS")
     width: Kirigami.Units.gridUnit * 64
     height: Kirigami.Units.gridUnit * 42
     minimumWidth: Kirigami.Units.gridUnit * 46
@@ -171,7 +171,7 @@ QQC2.ApplicationWindow {
         if (!accepted) {
             // The password stays, so the user can try again.
             root.show("review");
-            root.installRefusal = root.installState !== "idle" ? qsTr("An install is already running, or the PC is restarting.") : qsTr("AtlasOS couldn't start the install with these choices. Go back and check the disk and the password or PIN, then try again.");
+            root.installRefusal = root.installState !== "idle" ? qsTr("An install is already running, or the PC is restarting.") : qsTr("Telamon OS couldn't start the install with these choices. Go back and check the disk and the password or PIN, then try again.");
             return;
         }
         root.wipePassword();

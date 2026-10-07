@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spike S3: install AtlasOS into the free space beside Windows, by hand from
+# Spike S3: install Telamon OS into the free space beside Windows, by hand from
 # the live session, the way the installer's "Use free space" will. Runs as
 # root in the live VM.
 #
@@ -13,7 +13,7 @@ set -euo pipefail
 
 disk=$1
 src=ghcr.io/eternalcoder454/atlasos:stable
-target=/run/atlas-target
+target=/run/telamon-target
 state=/run/atlas-s3
 esp_type=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 mkdir -p "$state" "$target"

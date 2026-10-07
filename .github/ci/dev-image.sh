@@ -18,7 +18,7 @@ hash=$({
 	cat app/Containerfile.dev app/Containerfile.telamon-ui .github/ci/dev-image.sh
 	echo "$FRAMEWORK_SHA"
 } | sha256sum | cut -c1-16)
-image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/atlas-installer-dev:$hash
+image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telamon-installer-dev:$hash
 
 case ${1:-} in
 name)
@@ -35,7 +35,7 @@ build)
 		exit 1
 	fi
 	docker build --progress=plain --build-arg BUILDKIT_SYNTAX="$syntax" \
-		-t localhost/atlas-installer-dev -f app/Containerfile.dev app
+		-t localhost/telamon-installer-dev -f app/Containerfile.dev app
 	docker build --progress=plain --build-arg BUILDKIT_SYNTAX="$syntax" \
 		--build-context atlas-framework="$framework" \
 		--label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \

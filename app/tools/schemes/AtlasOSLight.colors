@@ -5,9 +5,9 @@
 # SPDX-FileCopyrightText: Neal Gompa <ngompa@kde.org>
 # SPDX-FileCopyrightText: David Redondo <kde@david-redondo.de>
 # SPDX-License-Identifier: LGPL-2.0-or-later
-# SPDX-FileCopyrightText: AtlasOS (colours from the AtlasOS logo)
+# SPDX-FileCopyrightText: Telamon OS (colours from the Telamon OS logo)
 #
-# Breeze Light, recoloured with the AtlasOS logo: violet accent #6858E2,
+# Breeze Light, recoloured with the Telamon OS logo: violet accent #6858E2,
 # ink #1B1748 text, lavender-tinted surfaces.
 
 [ColorEffects:Disabled]

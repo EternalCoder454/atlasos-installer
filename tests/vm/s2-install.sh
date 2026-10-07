@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spike S2: install AtlasOS by hand from the live session, the way the
+# Spike S2: install Telamon OS by hand from the live session, the way the
 # installer's helper will. Runs as root in the live VM.
 #
 #   s2-install.sh <disk> podman|direct
@@ -11,7 +11,7 @@ set -euxo pipefail
 disk=$1
 how=$2
 src=ghcr.io/eternalcoder454/atlasos:stable
-target=/run/atlas-target
+target=/run/telamon-target
 
 case $disk in *nvme* | *mmcblk*) p=p ;; *) p= ;; esac
 

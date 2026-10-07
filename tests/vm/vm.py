@@ -16,7 +16,7 @@ encryption unlocked by the TPM (without it the VM has none); its state lives wit
 `virsh screenshot` can read it), a serial console and the guest agent
 channel. Names are prefixed "atlasinst-", and disks live in build/vm/, so
 nothing else in libvirt is ever touched. Commands run through the QEMU guest
-agent, which AtlasOS enables.
+agent, which Telamon OS enables.
 """
 
 import argparse

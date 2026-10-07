@@ -1,14 +1,14 @@
 [Unit]
-Description=AtlasOS installer helper (partitions a disk and runs bootc install)
+Description=Telamon OS installer helper (partitions a disk and runs bootc install)
 Documentation=https://github.com/EternalCoder454/atlasos-installer
 
 [Service]
 Type=dbus
-BusName=net.eterneon.atlas.InstallerHelper
-ExecStart=/usr/libexec/atlas-installer-helper
+BusName=net.eterneon.telamon.InstallerHelper
+ExecStart=/usr/libexec/telamon-installer-helper
 # No sandboxing on purpose (no ProtectSystem, PrivateTmp, PrivateMounts,
 # ProtectHome, NoNewPrivileges, ...). The helper writes partition tables,
-# formats and mounts filesystems under /run/atlas-target, runs bootc against
+# formats and mounts filesystems under /run/telamon-target, runs bootc against
 # the live system's container storage and writes firmware boot entries; the
 # mounts must be visible to bootc and to the user's session. It exits by
 # itself after 60 seconds without calls, except once an install has started
