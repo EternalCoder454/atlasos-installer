@@ -408,7 +408,7 @@ impl Runner for Fake {
                     (
                         "0006,",
                         format!(
-                            "Boot0006* AtlasOS\tHD(1,GPT,{esp},0x800,0x32000)/\\EFI\\fedora\\shimx64.efi\n"
+                            "Boot0006* Telamon OS\tHD(1,GPT,{esp},0x800,0x32000)/\\EFI\\fedora\\shimx64.efi\n"
                         ),
                     )
                 } else {
@@ -583,6 +583,8 @@ fn free_space_beside_windows() {
              T/ostree/deploy/default/deploy/abc123.0/etc/X11 \
              T/ostree/deploy/default/deploy/abc123.0/etc/X11/xorg.conf.d \
              T/ostree/deploy/default/deploy/abc123.0/etc/X11/xorg.conf.d/00-keyboard.conf \
+             T/ostree/deploy/default/deploy/abc123.0/etc/telamon \
+             T/ostree/deploy/default/deploy/abc123.0/etc/telamon/installer.ini \
              T/ostree/deploy/default/deploy/abc123.0/etc/atlasos \
              T/ostree/deploy/default/deploy/abc123.0/etc/atlasos/installer.ini",
             "setfiles -F -r T \
@@ -590,7 +592,7 @@ fn free_space_beside_windows() {
              T/boot/grub2 \
              T/boot/grub2/custom.cfg",
             "efibootmgr",
-            "efibootmgr --quiet --create --disk /dev/sda --part 1 --loader \\EFI\\fedora\\shimx64.efi --label AtlasOS",
+            "efibootmgr --quiet --create --disk /dev/sda --part 1 --loader \\EFI\\fedora\\shimx64.efi --label Telamon OS",
             "efibootmgr",
             "efibootmgr --quiet --bootnext 0006",
             "efibootmgr --quiet --delete-bootnum --bootnum 0005",
@@ -598,8 +600,8 @@ fn free_space_beside_windows() {
              T/ostree/deploy/default/deploy/abc123.0/etc/selinux/targeted/contexts/files/file_contexts \
              T/ostree/deploy/default/var \
              T/ostree/deploy/default/var/log \
-             T/ostree/deploy/default/var/log/atlas-installer \
-             T/ostree/deploy/default/var/log/atlas-installer/install.log",
+             T/ostree/deploy/default/var/log/telamon-installer \
+             T/ostree/deploy/default/var/log/telamon-installer/install.log",
             "umount --recursive T",
             "umount --recursive /run/bootc/storage",
         ]
@@ -631,12 +633,17 @@ fn free_space_beside_windows() {
             .unwrap()
             .contains("\"nodeadkeys\"")
     );
-    let ini = fs::read_to_string(etc.join("atlasos/installer.ini")).unwrap();
+    let ini = fs::read_to_string(etc.join("telamon/installer.ini")).unwrap();
     assert!(
         ini.ends_with(
             "Language=de_DE.UTF-8\nKeyboardLayout=de\nKeyboardVariant=nodeadkeys\nNetwork=false\n"
         ),
         "{ini}"
+    );
+    // where Atlas Installer put it, for a wizard built before the rename
+    assert_eq!(
+        fs::read_to_string(etc.join("atlasos/installer.ini")).unwrap(),
+        ini
     );
     let cfg = fs::read_to_string(w.env.target.join("boot/grub2/custom.cfg")).unwrap();
     assert!(cfg.contains("--set=root 4A1B-2C3D\n"), "{cfg}");
@@ -684,7 +691,7 @@ fn erase_wipes_everything_and_drops_the_windows_entry() {
     );
     assert!(writes.contains(&"mkfs.vfat -F 32 -n EFI /dev/sda1".to_string()));
     assert!(writes.contains(&"mount /dev/sda1 T/boot/efi".to_string()));
-    assert!(writes.contains(&"efibootmgr --quiet --create --disk /dev/sda --part 1 --loader \\EFI\\fedora\\shimx64.efi --label AtlasOS".to_string()));
+    assert!(writes.contains(&"efibootmgr --quiet --create --disk /dev/sda --part 1 --loader \\EFI\\fedora\\shimx64.efi --label Telamon OS".to_string()));
     assert!(!out.windows_entry, "Windows was on the erased disk");
     assert!(!w.env.target.join("boot/grub2/custom.cfg").exists());
 }
@@ -782,7 +789,7 @@ fn no_key_without_secure_boot_or_when_enrolled() {
 fn wifi_is_carried_over_without_the_live_user() {
     let w = World::new();
     let kf = format!(
-        "[connection]\nid=Home\nuuid={UUID}\ntype=wifi\npermissions=user:atlas-installer;\n\n[wifi-security]\npsk=secret\n"
+        "[connection]\nid=Home\nuuid={UUID}\ntype=wifi\npermissions=user:telamon-installer;\n\n[wifi-security]\npsk=secret\n"
     );
     w.put(
         "etc/NetworkManager/system-connections/Home.nmconnection",
@@ -809,7 +816,7 @@ fn wifi_is_carried_over_without_the_live_user() {
         .join("etc/NetworkManager/system-connections/Home.nmconnection");
     let text = fs::read_to_string(&copy).unwrap();
     assert!(text.contains("psk=secret") && !text.contains("permissions="));
-    let ini = fs::read_to_string(w.deploy().join("etc/atlasos/installer.ini")).unwrap();
+    let ini = fs::read_to_string(w.deploy().join("etc/telamon/installer.ini")).unwrap();
     assert!(ini.contains("\nNetwork=true\n"), "{ini}");
     assert_eq!(
         fs::metadata(&copy).unwrap().permissions().mode() & 0o777,
@@ -825,7 +832,9 @@ fn wifi_is_carried_over_without_the_live_user() {
 #[test]
 fn the_wizard_is_told_about_the_network() {
     let network = |w: &World| {
-        let ini = fs::read_to_string(w.deploy().join("etc/atlasos/installer.ini")).unwrap();
+        let ini = fs::read_to_string(w.deploy().join("etc/telamon/installer.ini")).unwrap();
+        let old = fs::read_to_string(w.deploy().join("etc/atlasos/installer.ini")).unwrap();
+        assert_eq!(ini, old, "both copies say the same");
         ini.lines()
             .find_map(|l| l.strip_prefix("Network="))
             .unwrap()
@@ -1151,11 +1160,11 @@ fn late_failures_are_warnings_on_a_finished_install() {
     let out = w.install(&req("sda", "free-space")).0.unwrap();
     let all = out.warnings.join("\n");
     assert_eq!(out.warnings.len(), 5, "{all}");
-    assert!(all.contains("start AtlasOS next"), "{all}");
+    assert!(all.contains("start Telamon OS next"), "{all}");
     assert!(all.contains("SELinux label"), "{all}");
     assert!(all.contains("Boot0005 could not be removed"), "{all}");
     assert!(all.contains("could not be unmounted"), "{all}");
-    assert!(w.writes().iter().any(|c| c.ends_with("--label AtlasOS")));
+    assert!(w.writes().iter().any(|c| c.ends_with("--label Telamon OS")));
 }
 
 #[test]
@@ -2022,7 +2031,7 @@ fn links_are_placed_atomically_and_never_followed() {
     let dir = base.join("systemd/system/multi-user.target.wants");
     let victim = w.env.root.join("victim");
     fs::write(&victim, "keep").unwrap();
-    let tmp = dir.join(format!(".x.service.atlas-tmp-{}", std::process::id()));
+    let tmp = dir.join(format!(".x.service.telamon-tmp-{}", std::process::id()));
     std::os::unix::fs::symlink(&victim, &tmp).unwrap();
     assert!(write_link(&base, rel, "../y.service").unwrap().is_empty());
     assert_eq!(
@@ -2497,7 +2506,7 @@ fn a_failed_disk_listing_still_releases_the_known_nodes() {
 /// the helper doesn't start.
 #[test]
 fn the_service_unit_is_well_formed() {
-    let text = include_str!("../data/systemd/atlas-installer-helper.service");
+    let text = include_str!("../data/systemd/telamon-installer-helper.service");
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
         if line.starts_with('#') || line.starts_with(';') {
             continue;
@@ -2744,30 +2753,30 @@ fn a_tpm_install_seals_to_pcr_7_at_the_first_start() {
         assert!(out.warnings.is_empty(), "{:?}", out.warnings);
         let u = w.luks_uuid();
         let d = w.deploy();
-        let unit_path = d.join("etc/systemd/system/atlas-tpm-seal.service");
+        let unit_path = d.join("etc/systemd/system/telamon-tpm-seal.service");
         let unit = fs::read_to_string(&unit_path).unwrap();
         let e: Encryption = enc.parse().unwrap();
         assert_eq!(unit, crypt::seal_unit(e, &u).unwrap());
         assert!(unit.contains(&format!("/dev/disk/by-uuid/{u}\n")));
         assert_eq!(mode(&unit_path), 0o644);
-        let link = d.join("etc/systemd/system/multi-user.target.wants/atlas-tpm-seal.service");
+        let link = d.join("etc/systemd/system/multi-user.target.wants/telamon-tpm-seal.service");
         assert_eq!(
             fs::read_link(&link).unwrap(),
-            Path::new("../atlas-tpm-seal.service")
+            Path::new("../telamon-tpm-seal.service")
         );
-        let marker = d.join("etc/atlas-installer/tpm-seal");
+        let marker = d.join("etc/telamon-installer/tpm-seal");
         assert_eq!(
             fs::read_to_string(&marker).unwrap(),
             crypt::SEAL_MARKER_TEXT
         );
         assert_eq!(mode(&marker), 0o600);
-        assert_eq!(mode(&d.join("etc/atlas-installer")), 0o700);
+        assert_eq!(mode(&d.join("etc/telamon-installer")), 0o700);
         assert_eq!(
             mode(&d.join("etc")),
             0o755,
             "only the last directory is private"
         );
-        let pin = d.join("etc/atlas-installer/tpm-pin");
+        let pin = d.join("etc/telamon-installer/tpm-pin");
         if enc == "tpm-pin" {
             assert_eq!(fs::read_to_string(&pin).unwrap(), PIN, "no newline");
             assert_eq!(mode(&pin), 0o600);
@@ -2780,7 +2789,7 @@ fn a_tpm_install_seals_to_pcr_7_at_the_first_start() {
             .find(|c| c.name() == "setfiles" && c.args.iter().any(|a| a.ends_with("tpm-seal")))
             .map(|c| c.args.clone())
             .expect("labelled");
-        for f in [&unit_path, &link, &d.join("etc/atlas-installer")] {
+        for f in [&unit_path, &link, &d.join("etc/telamon-installer")] {
             assert!(label.contains(&f.display().to_string()), "{f:?}");
         }
         assert_eq!(label.contains(&pin.display().to_string()), enc == "tpm-pin");
@@ -2796,10 +2805,10 @@ fn a_tpm_install_seals_to_pcr_7_at_the_first_start() {
             .unwrap();
         assert!(
             !w.deploy()
-                .join("etc/systemd/system/atlas-tpm-seal.service")
+                .join("etc/systemd/system/telamon-tpm-seal.service")
                 .exists()
         );
-        assert!(!w.deploy().join("etc/atlas-installer").exists());
+        assert!(!w.deploy().join("etc/telamon-installer").exists());
     }
 }
 
@@ -2815,7 +2824,7 @@ fn the_new_system_keeps_the_install_log_and_the_tpm_event_log() {
     let dir = w
         .env
         .target
-        .join("ostree/deploy/default/var/log/atlas-installer");
+        .join("ostree/deploy/default/var/log/telamon-installer");
     let kept = fs::read_to_string(dir.join("install.log")).unwrap();
     assert!(kept.contains("encryption: tpm-pin"), "{kept}");
     assert!(kept.contains("# this log is kept in the new system"));
@@ -2851,7 +2860,8 @@ fn the_new_system_keeps_the_install_log_and_the_tpm_event_log() {
 #[test]
 fn the_chosen_apps_are_recorded_for_the_first_start() {
     use std::os::unix::fs::PermissionsExt;
-    let record = "ostree/deploy/default/var/lib/atlasos/first-boot-apps.json";
+    let record = "ostree/deploy/default/var/lib/telamon/first-boot-apps.json";
+    let legacy = "ostree/deploy/default/var/lib/atlasos/first-boot-apps.json";
     let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let w = World::new();
     let r = req("sda", "free-space")
@@ -2873,16 +2883,36 @@ fn the_chosen_apps_are_recorded_for_the_first_start() {
         fs::metadata(dir).unwrap().permissions().mode() & 0o777,
         0o755
     );
-    let labelled = w
-        .writes()
-        .into_iter()
-        .any(|c| c.starts_with("setfiles") && c.ends_with("var/lib/atlasos/first-boot-apps.json"));
-    assert!(labelled);
+    // the same list where Atlas Installer put it, for an image whose
+    // first-start script has not moved
+    assert_eq!(
+        fs::read_to_string(w.env.target.join(legacy)).unwrap(),
+        fs::read_to_string(&path).unwrap()
+    );
+    assert_eq!(
+        fs::metadata(w.env.target.join(legacy).parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+    for file in [
+        "var/lib/telamon/first-boot-apps.json",
+        "var/lib/atlasos/first-boot-apps.json",
+    ] {
+        let labelled = w
+            .writes()
+            .into_iter()
+            .any(|c| c.starts_with("setfiles") && c.contains(file));
+        assert!(labelled, "{file}");
+    }
 
     // none chosen: no record
     let w = World::new();
     w.install(&req("sda", "free-space")).0.unwrap();
     assert!(!w.env.target.join(record).exists());
+    assert!(!w.env.target.join(legacy).exists());
 
     // anything not on the list is refused before the install starts
     for bad in [
@@ -2907,6 +2937,20 @@ fn the_chosen_apps_are_recorded_for_the_first_start() {
     let r = req("sda", "free-space")
         .with_apps(&ids(&["brave"]))
         .unwrap();
+    let out = w.install(&r).0.unwrap();
+    assert!(
+        out.warnings.iter().any(|x| x.contains("apps you picked")),
+        "{:?}",
+        out.warnings
+    );
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    // and the same for the new name's directory
+    let w = World::new();
+    let outside = w.env.root.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    let var_lib = w.env.target.join("ostree/deploy/default/var/lib");
+    fs::create_dir_all(&var_lib).unwrap();
+    std::os::unix::fs::symlink(&outside, var_lib.join("telamon")).unwrap();
     let out = w.install(&r).0.unwrap();
     assert!(
         out.warnings.iter().any(|x| x.contains("apps you picked")),

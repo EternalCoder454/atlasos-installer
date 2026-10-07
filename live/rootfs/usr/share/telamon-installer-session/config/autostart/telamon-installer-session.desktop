@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Install Telamon OS
+Exec=/usr/libexec/telamon-installer-session
+Icon=net.eterneon.telamon.installer
+NoDisplay=true
+X-KDE-StartupNotify=false

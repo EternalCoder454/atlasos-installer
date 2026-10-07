@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // One installer step: the question as a big title and a line under it, the
 // page's content, and a footer with a quiet Back on the left and the accent

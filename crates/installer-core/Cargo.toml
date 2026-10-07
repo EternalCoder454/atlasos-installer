@@ -1,6 +1,6 @@
 [package]
 name = "installer-core"
-description = "Disk listing, partition planning and settings for Atlas Installer (pure logic, no I/O)"
+description = "Disk listing, partition planning and settings for Telamon Installer (pure logic, no I/O)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

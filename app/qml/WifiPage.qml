@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 3 (optional): Wi-Fi. The install needs no internet; the connection
 // is copied to the installed system, so first-run setup is online.
@@ -32,7 +32,7 @@ InstallerPage {
     onOpenChanged: page.syncNetworks()
 
     title: qsTr("Connect to Wi-Fi")
-    subtitle: page.connected ? qsTr("AtlasOS will connect to %1 after it starts.").arg(page.wifi.activeSsid) : qsTr("Connect now so AtlasOS can finish setting up after it starts. You can also do this later: the install itself needs no internet.")
+    subtitle: page.connected ? qsTr("Telamon OS will connect to %1 after it starts.").arg(page.wifi.activeSsid) : qsTr("Connect now so Telamon OS can finish setting up after it starts. You can also do this later: the install itself needs no internet.")
     primaryText: page.connected ? qsTr("Continue") : qsTr("Set Up Later")
     primaryEnabled: page.connecting.length === 0
     onPrimary: page.app.next()
@@ -120,7 +120,7 @@ InstallerPage {
             visible: box.hidden
             spacing: Kirigami.Units.largeSpacing
             Layout.fillWidth: true
-            AtlasTextField {
+            TelamonTextField {
                 id: nameField
                 Layout.fillWidth: true
                 placeholderText: qsTr("Network name")
@@ -128,7 +128,7 @@ InstallerPage {
                 enabled: page.connecting.length === 0
                 onAccepted: password.forceActiveFocus()
             }
-            AtlasComboBox {
+            TelamonComboBox {
                 id: security
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 14
                 enabled: page.connecting.length === 0
@@ -145,7 +145,7 @@ InstallerPage {
         RowLayout {
             spacing: Kirigami.Units.largeSpacing
             Layout.fillWidth: true
-            AtlasPasswordField {
+            TelamonPasswordField {
                 id: password
                 Layout.fillWidth: true
                 placeholderText: qsTr("Password")
@@ -179,7 +179,7 @@ InstallerPage {
             }
             // Only while there's nothing to list yet: the rescan every 15 s
             // just updates the rows, without a spinner redrawing the page.
-            AtlasSpinner {
+            TelamonSpinner {
                 running: page.app.backend.wifiScanning && (page.wifi.networks || []).length === 0
                 implicitWidth: Kirigami.Units.iconSizes.small
                 implicitHeight: implicitWidth

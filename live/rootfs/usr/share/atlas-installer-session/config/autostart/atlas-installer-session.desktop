@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Install AtlasOS
-Exec=/usr/libexec/atlas-installer-session
-Icon=net.eterneon.atlas.installer
-NoDisplay=true
-X-KDE-StartupNotify=false

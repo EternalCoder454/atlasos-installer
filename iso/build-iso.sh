@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the AtlasOS live ISO. Runs inside the builder container
+# Builds the Telamon OS live ISO. Runs inside the builder container
 # (iso/Containerfile.builder), started by iso/make-iso.sh, with:
 #
 #   /rootfs        the live image (live/Containerfile), mounted read-only
@@ -73,11 +73,11 @@ insmod part_gpt
 insmod iso9660
 search --no-floppy --set=root --label '$ISO_LABEL'
 
-menuentry 'Install AtlasOS' {
+menuentry 'Install Telamon OS' {
 	linux /images/pxeboot/vmlinuz $args
 	initrd /images/pxeboot/initrd.img
 }
-menuentry 'Install AtlasOS (basic graphics)' {
+menuentry 'Install Telamon OS (basic graphics)' {
 	linux /images/pxeboot/vmlinuz $args nomodeset
 	initrd /images/pxeboot/initrd.img
 }

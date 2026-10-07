@@ -4,8 +4,8 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
-import net.eterneon.atlas.installer
+import Telamon.Ui
+import net.eterneon.telamon.installer
 
 // Step 1: a welcome, and the installed system's language.
 InstallerPage {
@@ -13,8 +13,8 @@ InstallerPage {
 
     required property var app
 
-    title: qsTr("Welcome to AtlasOS")
-    subtitle: qsTr("Which language should AtlasOS use? The installer itself stays in English.")
+    title: qsTr("Welcome to Telamon OS")
+    subtitle: qsTr("Which language should Telamon OS use? The installer itself stays in English.")
     backVisible: false
     primaryEnabled: page.app.language.length > 0
     onPrimary: page.app.next()

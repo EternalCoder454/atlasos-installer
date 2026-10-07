@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 4: which apps to add at the first start. Built from the catalog
 // (firstboot/apps.json): a new entry there shows up here with no change.
@@ -49,7 +49,7 @@ InstallerPage {
             QQC2.Label {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
-                text: qsTr("They're added the first time AtlasOS starts, once it's online.")
+                text: qsTr("They're added the first time Telamon OS starts, once it's online.")
                 wrapMode: Text.Wrap
                 opacity: 0.65
             }

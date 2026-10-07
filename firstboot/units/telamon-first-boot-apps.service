@@ -1,13 +1,16 @@
 [Unit]
-Description=Install the apps chosen in the AtlasOS installer
+Description=Install the apps chosen in the Telamon OS installer
 Wants=network-online.target
 # After multi-user.target too, so the boot is not held up for the retries while offline.
 After=network-online.target multi-user.target
-ConditionPathExists=/var/lib/atlasos/first-boot-apps.json
+# The record under the new name, or under the old one (Atlas Installer's, and
+# an installed system's that has not run the first start yet): either starts it.
+ConditionPathExists=|/var/lib/telamon/first-boot-apps.json
+ConditionPathExists=|/var/lib/atlasos/first-boot-apps.json
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/atlasos/atlas-first-boot-apps system
+ExecStart=/usr/libexec/telamon/telamon-first-boot-apps system
 TimeoutStartSec=3h
 Restart=on-failure
 RestartSec=30

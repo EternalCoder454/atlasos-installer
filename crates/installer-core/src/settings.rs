@@ -108,7 +108,7 @@ pub fn vconsole_conf(console: &str, k: &Keymap) -> String {
 /// `/etc/X11/xorg.conf.d/00-keyboard.conf`, as systemd-localed writes it.
 pub fn x11_keyboard_conf(k: &Keymap) -> String {
     let mut s = String::from(
-        "# Written by Atlas Installer, read by systemd-localed and Xorg.\n\
+        "# Written by Telamon Installer, read by systemd-localed and Xorg.\n\
          # Use localectl(1) to change it.\n\
          Section \"InputClass\"\n\
          \x20       Identifier \"system-keyboard\"\n\
@@ -123,14 +123,16 @@ pub fn x11_keyboard_conf(k: &Keymap) -> String {
     s
 }
 
-/// `/etc/atlasos/installer.ini`: what the installer already asked, so
-/// AtlasOS's first-run wizard (Atlas Wizard) can skip those pages. `network`
+/// `/etc/telamon/installer.ini` (and `/etc/atlasos/installer.ini`, where Atlas
+/// Installer put it, written too for one release): what the installer already
+/// asked, so the first-run wizard (Telamon Setup, Atlas Wizard before 0.2.0)
+/// can skip those pages. `network`
 /// is true when a Wi-Fi connection was carried over or the PC was on a
 /// cable; the wizard still shows its Wi-Fi page when it finds itself offline.
 /// The locale and keymap are validated, so neither can hold a newline.
 pub fn installer_ini(locale: &str, k: &Keymap, network: bool) -> String {
     format!(
-        "# Written by Atlas Installer. AtlasOS's first-run wizard reads it to\n\
+        "# Written by Telamon Installer. The first-run wizard of Telamon OS reads it to\n\
          # skip the questions the installer already asked.\n\
          [Installer]\n\
          Version=1\n\
@@ -318,7 +320,7 @@ mod tests {
 
     #[test]
     fn keyfile_copy_matches_uuid_and_drops_permissions() {
-        let kf = "[connection]\nid=Home\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\ntype=wifi\ninterface-name=wlan0\npermissions=user:atlas-installer;\n\n\
+        let kf = "[connection]\nid=Home\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\ntype=wifi\ninterface-name=wlan0\npermissions=user:telamon-installer;\n\n\
                   [wifi]\nssid=Home\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=secret\n\n[vpn]\npermissions=keep\n";
         let out = keyfile_for_install(kf, "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f").unwrap();
         assert!(!out.contains("permissions=user"));

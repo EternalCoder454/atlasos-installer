@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The UI's dev image for CI (ui.yml): app/Containerfile.dev plus
-# app/Containerfile.atlas-ui, with Atlas.Ui built from atlas-framework at
+# app/Containerfile.telamon-ui, with Telamon.Ui built from atlas-framework at
 # FRAMEWORK_SHA. The tag hashes everything that goes into the image, this
 # script included, so a change to any of it is a new tag.
 #
@@ -15,10 +15,10 @@ cd "$(dirname "$0")/../.."
 # The Dockerfile frontend, by digest: it runs inside BuildKit.
 syntax=docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 hash=$({
-	cat app/Containerfile.dev app/Containerfile.atlas-ui .github/ci/dev-image.sh
+	cat app/Containerfile.dev app/Containerfile.telamon-ui .github/ci/dev-image.sh
 	echo "$FRAMEWORK_SHA"
 } | sha256sum | cut -c1-16)
-image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/atlas-installer-dev:$hash
+image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/telamon-installer-dev:$hash
 
 case ${1:-} in
 name)
@@ -35,11 +35,11 @@ build)
 		exit 1
 	fi
 	docker build --progress=plain --build-arg BUILDKIT_SYNTAX="$syntax" \
-		-t localhost/atlas-installer-dev -f app/Containerfile.dev app
+		-t localhost/telamon-installer-dev -f app/Containerfile.dev app
 	docker build --progress=plain --build-arg BUILDKIT_SYNTAX="$syntax" \
 		--build-context atlas-framework="$framework" \
 		--label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
-		-t "$image" -f app/Containerfile.atlas-ui app
+		-t "$image" -f app/Containerfile.telamon-ui app
 	;;
 *)
 	echo "usage: dev-image.sh name|build" >&2

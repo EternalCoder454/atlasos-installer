@@ -163,7 +163,7 @@ pub fn hidden_reason(d: &Device, live_sources: &[String]) -> Option<&'static str
         return Some("the installer's boot media");
     }
     if all.iter().any(|x| has_iso_label(x)) {
-        return Some("holds an Atlas installer");
+        return Some("holds a Telamon OS installer");
     }
     if all.iter().any(|x| is_ventoy(x)) {
         return Some("Ventoy boot media");
@@ -283,7 +283,7 @@ pub fn boot_media(probe: &Probe) -> &'static str {
 /// Which other boot loader started the live system, if one did: `ventoy`
 /// (from a Ventoy stick) or `iso-file` (an ISO file booted from another boot
 /// loader's menu, which dmsquash-live mounts at [`ISOSCAN_MOUNT`]). That
-/// loader is measured into PCR 7, and AtlasOS's own boot isn't, so a TPM key
+/// loader is measured into PCR 7, and Telamon OS's own boot isn't, so a TPM key
 /// sealed to PCR 7 now would never unseal on the installed system.
 pub fn chain_loaded(probe: &Probe, mounts: &str) -> Option<&'static str> {
     let media = probe.lsblk.as_ref().and_then(|l| {
@@ -517,7 +517,7 @@ mod tests {
             hidden,
             [
                 ("/dev/loop0", "loop device"),
-                ("/dev/sda", "holds an Atlas installer"),
+                ("/dev/sda", "holds a Telamon OS installer"),
                 ("/dev/sdb", "the installer's boot media"),
                 ("/dev/sde", "RAID member"),
                 ("/dev/sdf", "read-only"),
@@ -538,11 +538,11 @@ mod tests {
         assert_eq!(small.size, 30 * GIB);
         assert_eq!(
             small.erase.reason.as_deref(),
-            Some("Too small: AtlasOS needs 40 GB.")
+            Some("Too small: Telamon OS needs 40 GB.")
         );
         assert_eq!(
             small.free_space.reason.as_deref(),
-            Some("Too small: AtlasOS needs 40 GB.")
+            Some("Too small: Telamon OS needs 40 GB.")
         );
 
         let nvme = &l.disks[2];
@@ -552,10 +552,10 @@ mod tests {
         assert!(nvme.bitlocker && !nvme.usb);
         assert!(nvme.erase.possible);
 
-        // an installed AtlasOS (btrfs label "atlasos") is not the ISO ("ATLASOS")
-        let atlas = &l.disks[3];
-        assert_eq!(atlas.contents, ["Linux"]);
-        assert!(atlas.erase.possible);
+        // an installed Telamon OS (btrfs label "atlasos") is not the ISO ("ATLASOS")
+        let installed = &l.disks[3];
+        assert_eq!(installed.contents, ["Linux"]);
+        assert!(installed.erase.possible);
 
         let blank = &l.disks[4];
         assert_eq!(blank.name, "Virtual disk");
@@ -563,7 +563,7 @@ mod tests {
         assert!(blank.erase.possible);
         assert_eq!(
             blank.free_space.reason.as_deref(),
-            Some("This disk has no partitions yet. Erase it to install AtlasOS.")
+            Some("This disk has no partitions yet. Erase it to install Telamon OS.")
         );
     }
 

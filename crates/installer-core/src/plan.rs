@@ -101,21 +101,21 @@ impl Unavailable {
     /// Windows, so the way to make room is to shrink it.
     pub fn message(self, windows: bool) -> String {
         match self {
-            Unavailable::TooSmall => "Too small: AtlasOS needs 40 GB.".into(),
+            Unavailable::TooSmall => "Too small: Telamon OS needs 40 GB.".into(),
             Unavailable::InUse => "A partition on this disk is in use. Restart the installer and try again.".into(),
-            Unavailable::NoTable => "This disk has no partitions yet. Erase it to install AtlasOS.".into(),
+            Unavailable::NoTable => "This disk has no partitions yet. Erase it to install Telamon OS.".into(),
             Unavailable::NotGpt => {
-                "This disk uses an old MBR partition table, so AtlasOS can't install beside what's on it.".into()
+                "This disk uses an old MBR partition table, so Telamon OS can't install beside what's on it.".into()
             }
             Unavailable::NoRoom { free, needed } => {
                 let have = format!("{} GB", free / GIB);
                 let need = format!("{} GB", needed.div_ceil(GIB));
                 if windows {
                     format!(
-                        "Not enough free space ({have}, AtlasOS needs {need}). Shrink Windows in Disk Management to make room, then restart the installer."
+                        "Not enough free space ({have}, Telamon OS needs {need}). Shrink Windows in Disk Management to make room, then restart the installer."
                     )
                 } else {
-                    format!("Not enough free space ({have}, AtlasOS needs {need}).")
+                    format!("Not enough free space ({have}, Telamon OS needs {need}).")
                 }
             }
             Unavailable::TableFull => "This disk's partition table has no room for more partitions.".into(),
@@ -422,7 +422,7 @@ impl Plan {
         Ok(())
     }
 
-    /// A readable summary, for `atlas-installer-helper --plan`.
+    /// A readable summary, for `telamon-installer-helper --plan`.
     pub fn describe(&self) -> String {
         let mib = |sectors: u64| sectors * self.sector_size / crate::MIB;
         let mut s = String::new();
@@ -807,7 +807,7 @@ mod tests {
             needed: 40 * GIB,
         }
         .message(true);
-        assert!(m.starts_with("Not enough free space (12 GB, AtlasOS needs 40 GB)"));
+        assert!(m.starts_with("Not enough free space (12 GB, Telamon OS needs 40 GB)"));
         assert!(m.contains("Shrink Windows"));
         assert!(
             !Unavailable::NoRoom {

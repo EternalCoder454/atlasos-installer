@@ -108,7 +108,7 @@ fn disk_row(d: &Disk, name: &str) -> DiskRow {
     let erase_text = match d.erase.reason.as_deref() {
         Some(r) if !d.erase.possible => r.to_string(),
         None if !d.erase.possible => NOT_POSSIBLE.into(),
-        _ if d.contents.is_empty() => "The disk is empty. AtlasOS uses all of it.".into(),
+        _ if d.contents.is_empty() => "The disk is empty. Telamon OS uses all of it.".into(),
         _ => format!(
             "Everything on this disk is erased, including {}.",
             lower_first(&d.description)
@@ -140,7 +140,7 @@ fn disk_row(d: &Disk, name: &str) -> DiskRow {
             .reason
             .clone()
             .or_else(|| d.free_space.reason.clone())
-            .unwrap_or_else(|| "AtlasOS can't be installed on this disk.".into())
+            .unwrap_or_else(|| "Telamon OS can't be installed on this disk.".into())
     };
     let note = if d.bitlocker {
         "Windows uses BitLocker on this disk. Have your recovery key ready: Windows may ask for it the next time it starts.".to_string()
@@ -148,7 +148,7 @@ fn disk_row(d: &Disk, name: &str) -> DiskRow {
         String::new()
     };
     let review_erase = if d.contents.is_empty() {
-        format!("{name} ({size}) is empty. AtlasOS uses all of it.")
+        format!("{name} ({size}) is empty. Telamon OS uses all of it.")
     } else {
         format!(
             "{name} ({size}) is erased: {} and all files on it are lost.",
@@ -175,7 +175,7 @@ fn disk_row(d: &Disk, name: &str) -> DiskRow {
         note,
         review_erase,
         review_free: format!(
-            "AtlasOS goes in {} of free space on {name} ({size}). {keeps}",
+            "Telamon OS goes in {} of free space on {name} ({size}). {keeps}",
             size_of_free(d.free_space.bytes),
         ),
     }
@@ -287,10 +287,10 @@ pub fn require_key(mut d: Done, encryption: &str) -> Done {
     };
     if d.recovery_key.is_empty() && !d.warnings.iter().any(|w| w.contains(NO_KEY)) {
         d.warnings.push(format!(
-            "AtlasOS is installed and encrypted, but its {NO_KEY}, so you don't have one yet. \
+            "Telamon OS is installed and encrypted, but its {NO_KEY}, so you don't have one yet. \
              After the restart, make a new one in a terminal with \
              \"sudo systemd-cryptenroll {unlock}--recovery-key --wipe-slot=recovery\" \
-             followed by the AtlasOS partition (\"lsblk -f\" shows it as crypto_LUKS), \
+             followed by the Telamon OS partition (\"lsblk -f\" shows it as crypto_LUKS), \
              and keep it away from this PC."
         ));
     }
@@ -407,7 +407,7 @@ pub fn encryption_mode(tpm2: bool, on: bool, pin: bool) -> &'static str {
 
 /// Quick Install's disk and mode ("erase" or "free-space"), when one
 /// choice is clearly the best and loses nothing: an empty internal disk
-/// (AtlasOS gets a disk of its own, and a Windows disk beside it stays
+/// (Telamon OS gets a disk of its own, and a Windows disk beside it stays
 /// untouched), else the free space on an internal disk. Never a disk with
 /// files on it to erase, never a USB, removable or hot-plugged disk, and
 /// never a guess between two equally good disks: then None, and the user
@@ -455,7 +455,7 @@ pub fn tpm2_of(list_json: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// The smallest disk AtlasOS installs to, for the Disk page's texts: the
+/// The smallest disk Telamon OS installs to, for the Disk page's texts: the
 /// same minimum the helper's disk list uses.
 pub fn min_disk_size() -> String {
     size(MIN_INSTALL_BYTES)
@@ -534,7 +534,8 @@ pub fn reattach(json: &str) -> Result<Reattach, String> {
             ))
         }
         "failed" => Ok(Reattach::Failed(
-            crate::helper::describe("net.eterneon.atlas.Error.Failed", s.error.as_deref()).message,
+            crate::helper::describe("net.eterneon.telamon.Error.Failed", s.error.as_deref())
+                .message,
         )),
         other => Err(format!("unknown install state {other:?}")),
     }
@@ -564,7 +565,7 @@ pub fn follow(r: Reattach) -> Follow {
     }
 }
 
-/// The apps chosen by default: Brave, which AtlasOS has always shipped.
+/// The apps chosen by default: Brave, which Telamon OS has always shipped.
 pub fn default_apps() -> Vec<String> {
     vec!["brave".to_string()]
 }
@@ -682,12 +683,12 @@ mod tests {
 
     #[test]
     fn a_reattached_install_carries_its_progress_result_and_error() {
-        let r = reattach(r#"{"state":"installing","fraction":0.42,"text":"Copying AtlasOS"}"#);
+        let r = reattach(r#"{"state":"installing","fraction":0.42,"text":"Copying Telamon OS"}"#);
         assert_eq!(
             r,
             Ok(Reattach::Running {
                 fraction: 0.42,
-                text: "Copying AtlasOS".into()
+                text: "Copying Telamon OS".into()
             })
         );
         let Ok(Reattach::Done(d)) = reattach(
@@ -771,11 +772,14 @@ mod tests {
         let e = &rows[1];
         assert_eq!(e.subtitle, "466 GB · Empty");
         assert!(e.erase_ok && !e.free_ok);
-        assert_eq!(e.erase_text, "The disk is empty. AtlasOS uses all of it.");
+        assert_eq!(
+            e.erase_text,
+            "The disk is empty. Telamon OS uses all of it."
+        );
         assert!(e.free_text.starts_with("This disk has no partitions yet"));
         assert_eq!(
             e.review_erase,
-            "Crucial MX500 (466 GB) is empty. AtlasOS uses all of it."
+            "Crucial MX500 (466 GB) is empty. Telamon OS uses all of it."
         );
         assert!(e.empty && !rows[0].empty);
 
@@ -789,7 +793,7 @@ mod tests {
         let rows = disk_rows(&fixture());
         let s = &rows[3];
         assert!(!s.selectable && s.usb);
-        assert_eq!(s.reason, "Too small: AtlasOS needs 40 GB.");
+        assert_eq!(s.reason, "Too small: Telamon OS needs 40 GB.");
         assert_eq!(s.icon, "drive-removable-media-usb");
     }
 
@@ -837,7 +841,7 @@ mod tests {
             Some((rows[0].id.as_str(), "free-space"))
         );
 
-        // An empty disk that can't take AtlasOS (too small): not a choice
+        // An empty disk that can't take Telamon OS (too small): not a choice
         let mut small = rows.clone();
         small[1].selectable = false;
         assert_eq!(
@@ -855,7 +859,7 @@ mod tests {
     #[test]
     fn outcome() {
         let d = done_from_outcome(
-            r#"{"mok_password":"12345678","windows_entry":true,"boot_media":"usb","warnings":["w"],"log":"/run/atlas-installer/install.log"}"#,
+            r#"{"mok_password":"12345678","windows_entry":true,"boot_media":"usb","warnings":["w"],"log":"/run/telamon-installer/install.log"}"#,
         )
         .unwrap();
         assert_eq!(d.mok_password, "12345678");

@@ -1,4 +1,4 @@
-//! Demo mode, for screenshots and UI work: `ATLAS_INSTALLER_DEMO=1`, or a
+//! Demo mode, for screenshots and UI work: `TELAMON_INSTALLER_DEMO=1`, or a
 //! comma-separated list of the flags below. Nothing touches the system bus,
 //! the disks or the session; the disks come from `fixtures/disks.json`.
 //!
@@ -25,7 +25,7 @@
 //! | `encrypt` | The Disk page opens with "Encrypt this disk" turned on |
 //! | `cd` | Started from a disc, not a USB stick (the Restart page's wording) |
 //!
-//! `ATLAS_INSTALLER_DEMO_PAGE=<step>` opens at a step (welcome, keyboard,
+//! `TELAMON_INSTALLER_DEMO_PAGE=<step>` opens at a step (welcome, keyboard,
 //! wifi, disk, review, progress, restart), with the first disk chosen.
 //! `wifi-hidden` opens the Wi-Fi page with the "Other Network" form open.
 
@@ -59,16 +59,16 @@ pub struct Flags {
     pub pin: bool,
 }
 
-/// `None` unless `ATLAS_INSTALLER_DEMO` is set (and not empty or `0`).
+/// `None` unless `TELAMON_INSTALLER_DEMO` is set (and not empty or `0`).
 /// Never on the installer media: a fake install there would tell the user
-/// AtlasOS is installed when it isn't.
+/// Telamon OS is installed when it isn't.
 pub fn from_env() -> Option<Flags> {
     // Decided once: main.cpp and the Backend both ask, and a refusal is
     // logged only the first time.
     static DECIDED: std::sync::OnceLock<Option<Flags>> = std::sync::OnceLock::new();
     DECIDED
         .get_or_init(|| {
-            let v = std::env::var("ATLAS_INSTALLER_DEMO").ok()?;
+            let v = std::env::var("TELAMON_INSTALLER_DEMO").ok()?;
             let f = parse(&v)?;
             decide(f, crate::system::live_session())
         })
@@ -78,7 +78,7 @@ pub fn from_env() -> Option<Flags> {
 /// Flags only if this isn't the live session.
 fn decide(f: Flags, live: bool) -> Option<Flags> {
     if live {
-        eprintln!("atlas-installer: ignoring ATLAS_INSTALLER_DEMO in the live session");
+        eprintln!("telamon-installer: ignoring TELAMON_INSTALLER_DEMO in the live session");
         return None;
     }
     Some(f)
@@ -90,13 +90,13 @@ pub fn page_from_env() -> String {
     if from_env().is_none() {
         return String::new();
     }
-    std::env::var("ATLAS_INSTALLER_DEMO_PAGE").unwrap_or_default()
+    std::env::var("TELAMON_INSTALLER_DEMO_PAGE").unwrap_or_default()
 }
 
 /// Called once from `main.cpp`: [`page_from_env`] as a C string that lives
 /// for the whole run.
 #[unsafe(no_mangle)]
-pub extern "C" fn atlas_demo_page() -> *const std::ffi::c_char {
+pub extern "C" fn telamon_demo_page() -> *const std::ffi::c_char {
     static PAGE: std::sync::OnceLock<std::ffi::CString> = std::sync::OnceLock::new();
     PAGE.get_or_init(|| std::ffi::CString::new(page_from_env()).unwrap_or_default())
         .as_ptr()
@@ -139,7 +139,7 @@ pub fn parse(v: &str) -> Option<Flags> {
 pub async fn list_disks(f: &Flags) -> Result<String, helper::Error> {
     tokio::time::sleep(Duration::from_millis(600)).await;
     if f.busy {
-        return Err(helper::describe("net.eterneon.atlas.Error.Busy", None));
+        return Err(helper::describe("net.eterneon.telamon.Error.Busy", None));
     }
     let all = include_str!("../fixtures/disks.json");
     let mut list: serde_json::Value = serde_json::from_str(all).expect("fixture");
@@ -190,8 +190,8 @@ pub fn wifi(f: &Flags, connected: Option<&str>) -> WifiState {
         };
     }
     let mut networks = vec![
-        net("Atlas Home", 82, Security::Psk),
-        net("Atlas Home 5G", 64, Security::Sae),
+        net("Telamon Home", 82, Security::Psk),
+        net("Telamon Home 5G", 64, Security::Sae),
         net("Corner Cafe", 47, Security::Open),
         net("Office", 30, Security::Enterprise),
         net("DIRECT-printer", 18, Security::Psk),
@@ -275,9 +275,9 @@ pub async fn install(f: &Flags, progress: impl Fn(f64, String)) -> Result<String
         }
         if f.fail && x >= 0.5 {
             return Err(helper::describe(
-                "net.eterneon.atlas.Error.Failed",
+                "net.eterneon.telamon.Error.Failed",
                 Some(
-                    "bootc install failed: error: Installing to filesystem: Creating ostree deployment: No space left on device. The install log is at /run/atlas-installer/install.log",
+                    "bootc install failed: error: Installing to filesystem: Creating ostree deployment: No space left on device. The install log is at /run/telamon-installer/install.log",
                 ),
             ));
         }
@@ -329,11 +329,11 @@ fn outcome(f: &Flags) -> String {
         windows_entry: true,
         boot_media: if f.cd { "cd" } else { "usb" }.into(),
         warnings: if f.warn {
-            vec!["The firmware boot entry couldn't be renamed to AtlasOS: it is still called Fedora.".into()]
+            vec!["The firmware boot entry couldn't be renamed to Telamon OS: it is still called Fedora.".into()]
         } else {
             Vec::new()
         },
-        log: "/run/atlas-installer/install.log".into(),
+        log: "/run/telamon-installer/install.log".into(),
         recovery_key: String::new(),
         recovery_rows: Vec::new(),
     };
@@ -412,8 +412,8 @@ mod tests {
     #[test]
     fn stage_texts() {
         assert_eq!(text_at(0.0), "Getting ready");
-        assert_eq!(text_at(0.5), "Copying AtlasOS");
-        assert_eq!(text_at(0.8), "Setting up AtlasOS");
+        assert_eq!(text_at(0.5), "Copying Telamon OS");
+        assert_eq!(text_at(0.8), "Setting up Telamon OS");
         assert_eq!(text_at(0.99), "Finishing up");
     }
 }

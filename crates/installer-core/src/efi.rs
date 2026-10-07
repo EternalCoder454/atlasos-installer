@@ -1,6 +1,7 @@
-//! Firmware boot entries. bootupd names AtlasOS's entry "Fedora"; the
-//! installer replaces it with one called "AtlasOS" pointing at the same file
-//! (and replaces an "AtlasOS" entry left by an earlier install there too).
+//! Firmware boot entries. bootupd names Telamon OS's entry "Fedora"; the
+//! installer replaces it with one called "Telamon OS" pointing at the same file
+//! (and replaces a "Telamon OS" or "AtlasOS" entry left by an earlier install
+//! there too: the entry was called "AtlasOS" until the rename).
 
 /// One `BootXXXX` line of `efibootmgr` output.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +13,9 @@ pub struct BootEntry {
     pub path: String,
 }
 
-pub const LABEL: &str = "AtlasOS";
+pub const LABEL: &str = "Telamon OS";
+/// What the entry of an earlier install was called (until the rename).
+const ATLAS_LABEL: &str = "AtlasOS";
 const BOOTUPD_LABEL: &str = "Fedora";
 /// The loader bootupd registers, as efibootmgr's `--loader` takes it.
 pub const SHIM: &str = r"\EFI\fedora\shimx64.efi";
@@ -54,7 +57,7 @@ pub fn parse(out: &str) -> Vec<BootEntry> {
         .collect()
 }
 
-/// The "Fedora" (bootupd's) and "AtlasOS" entries for shim on the EFI
+/// The "Fedora" (bootupd's), "Telamon OS" and "AtlasOS" entries for shim on the EFI
 /// partition `partuuid`. Entries on other partitions (another Fedora) are
 /// left alone, and an EFI partition that already held `EFI/fedora` is never
 /// shared, so these are always this install's own.
@@ -62,7 +65,7 @@ pub fn stale_entries<'a>(entries: &'a [BootEntry], partuuid: &str) -> Vec<&'a Bo
     let uuid = partuuid.to_ascii_lowercase();
     entries
         .iter()
-        .filter(|e| e.label == BOOTUPD_LABEL || e.label == LABEL)
+        .filter(|e| e.label == BOOTUPD_LABEL || e.label == LABEL || e.label == ATLAS_LABEL)
         .filter(|e| {
             let p = e.path.to_ascii_lowercase();
             p.contains(&format!(",{uuid},")) && p.contains(&SHIM.to_ascii_lowercase())
@@ -83,7 +86,7 @@ mod tests {
         assert!(boot_order("BootCurrent: 0002\n").is_empty());
     }
 
-    // From spike S3: Windows and AtlasOS sharing an ESP.
+    // From spike S3: Windows and Telamon OS sharing an ESP.
     const OUT: &str = "BootCurrent: 0002\nTimeout: 0 seconds\nBootOrder: 0005,0002,0004,0003,0000,0001\n\
         Boot0000* BootManagerMenuApp\tFvVol(7cb8bdc9-f8eb-4f34-aaea-3ee4af6516a1)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)\n\
         Boot0002* UEFI QEMU DVD-ROM QM00003 \tPciRoot(0x0)/Pci(0x1f,0x2)/Sata(1,65535,0){auto_created_boot_option}\n\
@@ -110,12 +113,16 @@ mod tests {
             ["0005"]
         );
         assert!(stale_entries(&e, "00000000-0000-0000-0000-000000000000").is_empty());
-        // an earlier install's AtlasOS entry on the same partition goes too
-        let again = parse(&OUT.replace("Boot0002* UEFI QEMU DVD-ROM QM00003 \tPciRoot", "Boot0002* AtlasOS\tHD(1,GPT,37df3229-55d9-43ef-902c-a5a6565f521a,0x800,0x32000)/\\EFI\\fedora\\shimx64.efi\nBoot0007* x\tPciRoot"));
-        let ours = stale_entries(&again, "37df3229-55d9-43ef-902c-a5a6565f521a");
-        assert_eq!(
-            ours.iter().map(|x| x.num.as_str()).collect::<Vec<_>>(),
-            ["0002", "0005"]
-        );
+        // an earlier install's entry on the same partition goes too, under
+        // either name (the entry was called "AtlasOS" until the rename)
+        for old in ["Telamon OS", "AtlasOS"] {
+            let again = parse(&OUT.replace("Boot0002* UEFI QEMU DVD-ROM QM00003 \tPciRoot", &format!("Boot0002* {old}\tHD(1,GPT,37df3229-55d9-43ef-902c-a5a6565f521a,0x800,0x32000)/\\EFI\\fedora\\shimx64.efi\nBoot0007* x\tPciRoot")));
+            let ours = stale_entries(&again, "37df3229-55d9-43ef-902c-a5a6565f521a");
+            assert_eq!(
+                ours.iter().map(|x| x.num.as_str()).collect::<Vec<_>>(),
+                ["0002", "0005"],
+                "{old}"
+            );
+        }
     }
 }

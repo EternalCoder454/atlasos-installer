@@ -1,13 +1,13 @@
-//! Client for `net.eterneon.atlas.InstallerHelper1` (docs/helper-api.md).
+//! Client for `net.eterneon.telamon.InstallerHelper1` (docs/helper-api.md).
 //! Async, on the backend's tokio runtime. There is no method timeout:
 //! Install runs for minutes.
 
 use futures_util::StreamExt;
 
 #[zbus::proxy(
-    interface = "net.eterneon.atlas.InstallerHelper1",
-    default_service = "net.eterneon.atlas.InstallerHelper",
-    default_path = "/net/eterneon/atlas/InstallerHelper",
+    interface = "net.eterneon.telamon.InstallerHelper1",
+    default_service = "net.eterneon.telamon.InstallerHelper",
+    default_path = "/net/eterneon/telamon/InstallerHelper",
     gen_blocking = false
 )]
 pub trait InstallerHelper1 {
@@ -57,7 +57,7 @@ impl Error {
     }
 }
 
-const PREFIX: &str = "net.eterneon.atlas.Error.";
+const PREFIX: &str = "net.eterneon.telamon.Error.";
 
 /// Maps an error name and message to what the UI says.
 pub fn describe(name: &str, message: Option<&str>) -> Error {
@@ -66,7 +66,7 @@ pub fn describe(name: &str, message: Option<&str>) -> Error {
         Some("Busy") => Error {
             busy: true,
             transient: false,
-            message: "AtlasOS is already being installed, or the computer is restarting.".into(),
+            message: "Telamon OS is already being installed, or the computer is restarting.".into(),
         },
         Some("NotAuthorized") => Error::new("The installer wasn't allowed to change the disks."),
         Some("ShuttingDown") => Error::new("The installer service stopped. Try again."),
@@ -131,7 +131,7 @@ fn fdo_name(e: &zbus::fdo::Error) -> String {
 }
 
 fn shutting_down(e: &zbus::Error) -> bool {
-    matches!(e, zbus::Error::MethodError(n, _, _) if n.as_str() == "net.eterneon.atlas.Error.ShuttingDown")
+    matches!(e, zbus::Error::MethodError(n, _, _) if n.as_str() == "net.eterneon.telamon.Error.ShuttingDown")
 }
 
 async fn proxy() -> Result<InstallerHelper1Proxy<'static>, Error> {
@@ -199,18 +199,18 @@ mod tests {
 
     #[test]
     fn error_texts() {
-        let e = describe("net.eterneon.atlas.Error.Busy", Some("x"));
+        let e = describe("net.eterneon.telamon.Error.Busy", Some("x"));
         assert!(e.busy);
         assert_eq!(
             describe(
-                "net.eterneon.atlas.Error.Failed",
+                "net.eterneon.telamon.Error.Failed",
                 Some("the disk changed since it was listed")
             )
             .message,
             "The disk changed since it was listed"
         );
         assert_eq!(
-            describe("net.eterneon.atlas.Error.Failed", None).message,
+            describe("net.eterneon.telamon.Error.Failed", None).message,
             "Something went wrong."
         );
         assert!(
@@ -223,8 +223,8 @@ mod tests {
                 .message
                 .contains("AccessDenied")
         );
-        assert!(!describe("net.eterneon.atlas.Error.NotAuthorized", None).busy);
-        assert!(!describe("net.eterneon.atlas.Error.Failed", Some("x")).transient);
+        assert!(!describe("net.eterneon.telamon.Error.NotAuthorized", None).busy);
+        assert!(!describe("net.eterneon.telamon.Error.Failed", Some("x")).transient);
     }
 
     #[test]
@@ -232,6 +232,6 @@ mod tests {
         assert!(describe("org.freedesktop.DBus.Error.NoReply", None).transient);
         assert!(describe("org.freedesktop.DBus.Error.Disconnected", None).transient);
         assert!(!describe("org.freedesktop.DBus.Error.AccessDenied", None).transient);
-        assert!(!describe("net.eterneon.atlas.Error.Busy", None).transient);
+        assert!(!describe("net.eterneon.telamon.Error.Busy", None).transient);
     }
 }

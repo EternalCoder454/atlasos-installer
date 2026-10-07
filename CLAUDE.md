@@ -1,6 +1,6 @@
-# AtlasOS Installer
+# Telamon Installer
 
-The installer for AtlasOS (bootc, Fedora 44 based). The roadmap and the
+The installer for Telamon OS (bootc, Fedora 44 based). The roadmap and the
 Phase 0 results are in Atlas Notes, under `AtlasOS/Atlas Installer/Roadmap`.
 
 ## Layout
@@ -13,42 +13,42 @@ Phase 0 results are in Atlas Notes, under `AtlasOS/Atlas Installer/Roadmap`.
   - progress
 
   Its tests use the fixtures in `crates/installer-core/tests/fixtures/`.
-- `helper`: `atlas-installer-helper`, the root D-Bus/polkit helper. Its API
+- `helper`: `telamon-installer-helper`, the root D-Bus/polkit helper. Its API
   is in `docs/helper-api.md`. `install_tests.rs` runs the whole install
   against a fake runner and a temporary directory. The data files (D-Bus,
   polkit, systemd) are in `helper/data/`.
-- `app/`: `atlas-installer`, the UI (Rust with CXX-Qt, QML with Kirigami,
+- `app/`: `telamon-installer`, the UI (Rust with CXX-Qt, QML with Kirigami,
   built with CMake and Corrosion). It is outside the workspace and is built
   and tested only in its container, through `app/dev.sh`.
   - `src/backend.rs`: the QObject that QML uses. `src/helper.rs`: the helper
     client. `src/network.rs`: Wi-Fi through NetworkManager.
   - `src/view.rs`: what the pages show, unit-tested.
   - `src/demo.rs`: demo mode (see below). `qml/`: the pages.
-- Atlas.Ui (`import Atlas.Ui`) is not here: it is the installed module from
-  atlas-framework (`../Atlas Framework`, or `ATLAS_FRAMEWORK_SRC`), which
+- Telamon.Ui (`import Telamon.Ui`) is not here: it is the installed module from
+  atlas-framework (`../Atlas Framework`, or `TELAMON_FRAMEWORK_SRC`), which
   `app/dev.sh` builds into its image. Change it there, never copy it here.
 - `iso/`, `live/`: the live ISO build. `tests/vm/`: the VM test tools.
 - `.github/workflows/`: CI, on GitHub only (never run it locally).
   `rust.yml` covers the workspace. `ui.yml` covers `app/`, plus
   atlas-framework's app checks:
   - it runs in the dev image, which only main publishes on GHCR
-    (`ghcr.io/eternalcoder454/atlas-installer-dev`);
+    (`ghcr.io/eternalcoder454/telamon-installer-dev`);
   - `.github/ci/dev-image.sh` builds the image, and its tag hashes
     everything that goes in;
   - `.github/ci/dev-run.sh` runs the steps with no capabilities and no
     network.
 
   Actions are pinned by SHA, and atlas-framework by commit (`FRAMEWORK_SHA`,
-  v1.4.0). A new Atlas.Ui release changes both spots in `ui.yml`.
+  v2.0.0). A new Telamon.Ui release changes both spots in `ui.yml`.
 
 ## Commands
 
 | Task | Command |
 |---|---|
 | Tests | `env -u DISPLAY -u WAYLAND_DISPLAY cargo test --workspace` |
-| Build | `cargo build --release -p atlas-installer-helper` |
+| Build | `cargo build --release -p telamon-installer-helper` |
 | Lint and format | see below (clippy and rustfmt are not on the host) |
-| Build the UI | `app/dev.sh` (output in `build/app/atlas-installer`) |
+| Build the UI | `app/dev.sh` (output in `build/app/telamon-installer`) |
 | UI tests, lint, qmllint | `app/dev.sh bash -c 'cd app && cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cd .. && cmake --build build/app --target all_qmllint'` |
 | UI screenshot | `app/dev.sh app/tools/screenshot.sh OUT.png STEP FLAGS light\|dark [WAIT]` |
 
@@ -56,7 +56,7 @@ Lint and format run in a container:
 
 ```sh
 podman run --rm --security-opt label=disable -v "$PWD":/src -w /src \
-  -v atlas-cargo:/root/.cargo/registry -v atlas-dnf:/var/cache/libdnf5 \
+  -v telamon-cargo:/root/.cargo/registry -v telamon-dnf:/var/cache/libdnf5 \
   -e CARGO_TARGET_DIR=/src/target/container fedora:44 bash -c \
   'dnf -y -q --setopt=keepcache=1 install cargo clippy rustfmt gcc >/dev/null; cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings'
 ```
@@ -73,7 +73,7 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   Leave every other VM alone, including the user's `atlasos-daily`.
 - The ISO is `build/atlasos.iso`, built by `iso/make-iso.sh` from the
   published `:stable` (`--local` for this machine's `localhost/atlasos:latest`).
-  AtlasOS's `just iso` and `just iso-local` run it with `-o` into AtlasOS's
+  The Telamon OS repository's `just iso` and `just iso-local` run it with `-o` into its
   own `build/`.
 - The test matrix (which VMs, what to check) is in `DEV.md`. VMs have no
   Wi-Fi: `tests/vm/wifi-ap.sh <vm> [ssh]` adds mac80211_hwsim radios and a
@@ -98,8 +98,8 @@ access to the VM disks. Use `--security-opt label=disable` instead.
 ## The UI
 
 - **Demo mode** runs the UI without the helper, NetworkManager or the
-  session: `ATLAS_INSTALLER_DEMO=1`, or flags such as `wired,mok,fail`
-  (the list is in `app/src/demo.rs`). `ATLAS_INSTALLER_DEMO_PAGE=<step>`
+  session: `TELAMON_INSTALLER_DEMO=1`, or flags such as `wired,mok,fail`
+  (the list is in `app/src/demo.rs`). `TELAMON_INSTALLER_DEMO_PAGE=<step>`
   opens at a step. The app refuses demo mode in the live session.
 - **Screenshots** come from `app/tools/screenshot.sh`. It runs inside the
   container on Xvfb with a private bus and a Breeze colour scheme. It
@@ -114,18 +114,18 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   build container's. So when the dev container's builds differ from the
   image's, make-iso.sh builds in a copy pinned to the image's builds
   (`iso/Containerfile.pin`, `iso/pin-builds.sh`, signed RPMs from Koji).
-  - plasmalogin logs the `atlas-installer` user (from sysusers, with its
-    home in `/run/atlas-installer-session`) into a Plasma session. It has
+  - plasmalogin logs the `telamon-installer` user (from sysusers, with its
+    home in `/run/telamon-installer-session`) into a Plasma session. It has
     no panel and no screen lock, and allows only the screen reader and
     zoom shortcuts (its own `kglobalaccelrc`, adapted from plasma-setup).
-  - The session autostarts `/usr/libexec/atlas-installer-session`. It runs
+  - The session autostarts `/usr/libexec/telamon-installer-session`. It runs
     the installer with `--fullscreen` and starts it again if it closes.
-  - The polkit rule `50-atlas-installer-session.rules` allows that user the
+  - The polkit rule `50-telamon-installer-session.rules` allows that user the
     installer and NetworkManager actions without a password.
 - **In a VM**, boot the ISO and the installer comes up by itself:
   - To try a new build without rebuilding the ISO, push the helper with
-    `vm.py push` and copy `build/app/atlas-installer` to `/usr/bin/`. Then
-    `pkill -f '^/usr/bin/atlas-installer'`, and the session restarts it.
+    `vm.py push` and copy `build/app/telamon-installer` to `/usr/bin/`. Then
+    `pkill -f '^/usr/bin/telamon-installer'`, and the session restarts it.
   - Click with `tests/vm/click.sh <vm> X Y`, type with `virsh send-key`,
     and look with `vm.py shot`.
   - Shut the live session down cleanly (the UI's Restart, or `systemctl

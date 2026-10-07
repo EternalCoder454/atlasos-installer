@@ -1,9 +1,9 @@
 name: UI
 
 # The installer UI (app/): Rust over CXX-Qt with QML, which needs Qt,
-# Kirigami and Atlas.Ui. It builds in the dev image (.github/ci/dev-image.sh),
+# Kirigami and Telamon.Ui. It builds in the dev image (.github/ci/dev-image.sh),
 # kept prebuilt on GHCR and rebuilt only when what goes into it changes. The
-# ISO build is AtlasOS's iso.yml, not this.
+# ISO build is the AtlasOS repository's iso.yml, not this.
 on:
   push:
     branches: [main]
@@ -34,18 +34,18 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  # atlas-framework v1.4.0: the Atlas.Ui the UI is built and checked against.
+  # atlas-framework v2.0.0: the Telamon.Ui the UI is built and checked against.
   # By commit, as a tag can move. The app checks below pin the same commit.
-  FRAMEWORK_SHA: 7a114a112bd1fff4fe3d6facc81b0a81e5d2db30
+  FRAMEWORK_SHA: 8e6a53569363aec3d7e42920875d03ca113ef3eb
 
 jobs:
   # atlas-framework's design rules (no default buttons, no QML file named
-  # like an Atlas.Ui type).
-  atlas:
-    name: Atlas app checks
-    uses: EternalCoder454/atlas-framework/.github/workflows/app-checks.yml@7a114a112bd1fff4fe3d6facc81b0a81e5d2db30 # v1.4.0
+  # like a Telamon.Ui type).
+  telamon:
+    name: Telamon app checks
+    uses: EternalCoder454/atlas-framework/.github/workflows/app-checks.yml@8e6a53569363aec3d7e42920875d03ca113ef3eb # v2.0.0
     with:
-      framework-ref: 7a114a112bd1fff4fe3d6facc81b0a81e5d2db30
+      framework-ref: 8e6a53569363aec3d7e42920875d03ca113ef3eb
 
   # Only main publishes the dev image, and only this job can write packages.
   image:

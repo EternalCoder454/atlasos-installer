@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turns the AtlasOS image into the live session (live/Containerfile).
+# Turns the Telamon OS image into the live session (live/Containerfile).
 set -euo pipefail
 
 # dmsquash-live boots the squashfs on the ISO as the root filesystem, with an
@@ -29,10 +29,10 @@ while read -r name built; do
 done </src/installer/built-with
 cp -a /src/installer/root/. /
 
-# The live session: autologin as atlas-installer into a bare Plasma session
-# that runs the installer full-screen (rootfs/usr/share/atlas-installer-session).
+# The live session: autologin as telamon-installer into a bare Plasma session
+# that runs the installer full-screen (rootfs/usr/share/telamon-installer-session).
 cp -a /src/rootfs/. /
-systemd-sysusers /usr/lib/sysusers.d/atlas-installer-session.conf
+systemd-sysusers /usr/lib/sysusers.d/telamon-installer-session.conf
 
 # Nothing that updates, installs or checks the system runs live: the live
 # root is thrown away at shutdown.

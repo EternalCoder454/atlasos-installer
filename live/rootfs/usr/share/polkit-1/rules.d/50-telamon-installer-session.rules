@@ -5,9 +5,9 @@
 // (scan, add and activate a system connection, delete a failed one, turn the
 // radio on). A new helper action has to be added here on purpose.
 var allowed = [
-    "net.eterneon.atlas.installer.list-disks",
-    "net.eterneon.atlas.installer.install",
-    "net.eterneon.atlas.installer.reboot",
+    "net.eterneon.telamon.installer.list-disks",
+    "net.eterneon.telamon.installer.install",
+    "net.eterneon.telamon.installer.reboot",
     "org.freedesktop.NetworkManager.network-control",
     "org.freedesktop.NetworkManager.settings.modify.system",
     "org.freedesktop.NetworkManager.settings.modify.own",
@@ -17,7 +17,7 @@ var allowed = [
 ];
 
 polkit.addRule(function (action, subject) {
-    if (subject.user !== "atlas-installer" || !subject.local || !subject.active) {
+    if (subject.user !== "telamon-installer" || !subject.local || !subject.active) {
         return polkit.Result.NOT_HANDLED;
     }
     if (allowed.indexOf(action.id) >= 0) {

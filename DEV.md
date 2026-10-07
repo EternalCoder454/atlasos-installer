@@ -1,13 +1,13 @@
-# Developing Atlas Installer
+# Developing Telamon Installer
 
 ## How it fits together
 
 | Part | What it is |
 |---|---|
 | `crates/installer-core` | Pure logic, no I/O: lsblk and `sfdisk --json` parsing, which disks to offer, partition plans and their safety checks, settings files, GRUB `custom.cfg`, efibootmgr parsing, progress. Tested with the fixtures in `tests/fixtures/`. |
-| `helper/` | `atlas-installer-helper`, the root helper on the system D-Bus, behind polkit. It lists disks and runs the install. Its API is in [docs/helper-api.md](docs/helper-api.md), and its D-Bus, polkit and systemd files are in `helper/data/`. |
-| `app/` | `atlas-installer`, the UI: Rust with CXX-Qt, and QML with Kirigami, built with CMake and Corrosion. `src/backend.rs` is the QObject the pages use, `src/helper.rs` talks to the helper, `src/network.rs` does Wi-Fi through NetworkManager, and `src/view.rs` decides what each page shows. |
-| `live/` | The live image: the AtlasOS image plus the installer session. |
+| `helper/` | `telamon-installer-helper`, the root helper on the system D-Bus, behind polkit. It lists disks and runs the install. Its API is in [docs/helper-api.md](docs/helper-api.md), and its D-Bus, polkit and systemd files are in `helper/data/`. |
+| `app/` | `telamon-installer`, the UI: Rust with CXX-Qt, and QML with Kirigami, built with CMake and Corrosion. `src/backend.rs` is the QObject the pages use, `src/helper.rs` talks to the helper, `src/network.rs` does Wi-Fi through NetworkManager, and `src/view.rs` decides what each page shows. |
+| `live/` | The live image: the Telamon OS image plus the installer session. |
 | `iso/` | The ISO build. |
 | `tests/vm/` | Tools for the VM tests. |
 
@@ -22,31 +22,31 @@ the partitions as planned and that the old ones are unchanged.
 | Task | Command |
 |---|---|
 | Tests | `env -u DISPLAY -u WAYLAND_DISPLAY cargo test --workspace` |
-| The helper | `cargo build --release -p atlas-installer-helper` |
-| The UI | `app/dev.sh` (output in `build/app/atlas-installer`) |
+| The helper | `cargo build --release -p telamon-installer-helper` |
+| The UI | `app/dev.sh` (output in `build/app/telamon-installer`) |
 | UI tests, lint, qmllint | `app/dev.sh bash -c 'cd app && cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cd .. && cmake --build build/app --target all_qmllint'` |
 
 The UI is built and tested only in its container (`app/Containerfile.dev`),
 through `app/dev.sh`, so its Qt and Kirigami match the live image's.
 
-The shared controls (`import Atlas.Ui`) come from
+The shared controls (`import Telamon.Ui`) come from
 [atlas-framework](https://github.com/EternalCoder454/atlas-framework),
 installed in Qt's QML directory like Kirigami; the app links nothing from it.
 `app/dev.sh` builds it from a checkout beside this one (`../Atlas Framework`,
-or `ATLAS_FRAMEWORK_SRC`) into `localhost/atlas-installer-dev:atlas-ui`
-(`app/Containerfile.atlas-ui`). The ISO build instead copies it from the
-AtlasOS image it embeds (`iso/Containerfile.atlas-ui`), so the installer is
-built against the exact Atlas.Ui the live session runs. Atlas.Ui changes go
-to atlas-framework, never here. The installer needs Atlas.Ui 1.3.0 or newer
-(AtlasTextField, AtlasComboBox, AtlasSpinner): configuring stops with a plain
-message against an older one, which for an ISO means an AtlasOS image that
-ships `atlas-ui` older than 1.3.0.
+or `TELAMON_FRAMEWORK_SRC`) into `localhost/telamon-installer-dev:telamon-ui`
+(`app/Containerfile.telamon-ui`). The ISO build instead copies it from the
+Telamon OS image it embeds (`iso/Containerfile.telamon-ui`), so the installer is
+built against the exact Telamon.Ui the live session runs. Telamon.Ui changes go
+to atlas-framework, never here. The installer needs Telamon.Ui 2.0.0 or newer
+(TelamonTextField, TelamonComboBox, TelamonSpinner): configuring stops with a plain
+message against an older one, which for an ISO means a Telamon OS image that
+ships `telamon-ui` older than 2.0.0.
 
 Clippy and rustfmt for the workspace also run in a container:
 
 ```sh
 podman run --rm --security-opt label=disable -v "$PWD":/src -w /src \
-  -v atlas-cargo:/root/.cargo/registry -v atlas-dnf:/var/cache/libdnf5 \
+  -v telamon-cargo:/root/.cargo/registry -v telamon-dnf:/var/cache/libdnf5 \
   -e CARGO_TARGET_DIR=/src/target/container fedora:44 bash -c \
   'dnf -y -q --setopt=keepcache=1 install cargo clippy rustfmt gcc >/dev/null; cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings'
 ```
@@ -56,11 +56,11 @@ access to the VM disks.
 
 ## Running the UI without installing anything
 
-Demo mode, `ATLAS_INSTALLER_DEMO=1`, runs the UI with no helper,
+Demo mode, `TELAMON_INSTALLER_DEMO=1`, runs the UI with no helper,
 NetworkManager or live session. It's the only way the UI runs in the dev
-container, which has no system bus. `ATLAS_INSTALLER_DEMO` also takes flags
+container, which has no system bus. `TELAMON_INSTALLER_DEMO` also takes flags
 such as `wired,mok,fail` (the list is in `app/src/demo.rs`), and
-`ATLAS_INSTALLER_DEMO_PAGE=<step>` opens at a step.
+`TELAMON_INSTALLER_DEMO_PAGE=<step>` opens at a step.
 The app refuses demo mode in the live session.
 
 For screenshots, `app/dev.sh app/tools/screenshot.sh OUT.png STEP FLAGS
@@ -78,9 +78,9 @@ to the image's exact builds (`iso/Containerfile.pin`). `iso/pin-builds.sh`
 fetches those from Koji, which keeps every build, and installs them only if
 they carry Fedora's signature.
 
-In the live image, plasmalogin logs the `atlas-installer` user into a Plasma
+In the live image, plasmalogin logs the `telamon-installer` user into a Plasma
 session with no panel or screen lock. The session runs
-`/usr/libexec/atlas-installer-session`, which starts the installer full
+`/usr/libexec/telamon-installer-session`, which starts the installer full
 screen and starts it again if it closes. A polkit rule lets that user run the
 installer and NetworkManager actions without a password. None of this is in
 the installed system.
@@ -109,8 +109,8 @@ encryption unlocked by the TPM; its state is removed by `destroy`).
 
 To try a new build without rebuilding the ISO, push the helper and its data
 files with `vm.py push`, then run `systemctl daemon-reload` and D-Bus
-`ReloadConfig`. Copy `build/app/atlas-installer` to `/usr/bin/`, then
-`pkill -f '^/usr/bin/atlas-installer'`, and the session restarts the UI.
+`ReloadConfig`. Copy `build/app/telamon-installer` to `/usr/bin/`, then
+`pkill -f '^/usr/bin/telamon-installer'`, and the session restarts the UI.
 
 After an install, and before restarting:
 
@@ -131,16 +131,16 @@ After an install, and before restarting:
 Each release candidate ISO goes through these runs. Check the installed
 system each time: `bootc status` shows `:stable` at the digest the ISO
 embeds (in `build/atlasos.iso.image`), SELinux is enforcing, there are no
-failed units, the firmware boot entry is called AtlasOS, and the
-`atlas-installer` user isn't there.
+failed units, the firmware boot entry is called Telamon OS, and the
+`telamon-installer` user isn't there.
 
 | Run | VM | Check |
 |---|---|---|
 | Erase, Secure Boot on | `--disk 64 --disk 30 --secure-boot`, ISO as a CD | The 30 GB disk is greyed out and can't be chosen. The CD isn't listed. The Restart page says to take out the disc. |
 | Second disk, Secure Boot off | `--disk 64 --disk 64 --usb --media-first` | The USB stick isn't listed, and the Restart page says to remove it. The two disks are told apart (by serial, or by device path when they have none). Write random data to the start and end of the first disk beforehand, and check that it is identical afterwards. |
 | Beside Windows | an overlay of the Windows base, `--sata --usb --secure-boot --media-first` | "Install alongside Windows" is the default. MSR, C: and recovery hash the same before and after, and so does `EFI/Microsoft`. The GRUB menu waits 5 s and has a Windows entry that boots Windows. |
-| Encryption, TPM | `--disk 64 --media-first --tpm` | Choose "unlock with the TPM". The recovery key is shown. After the restart the system boots without a prompt. On the installed system `cryptsetup luksDump` shows two slots and one `systemd-tpm2` token with `tpm2-hash-pcrs: 7` (the first start sealed it: `atlas-tpm-seal.service` succeeded, `/etc/atlas-installer/` is empty), `/var/log/atlas-installer/` has `install.log` and `tpm-event-log.bin`, `lsblk` shows `luks-<uuid>` under the root partition, and `/proc/cmdline` has `rd.luks.uuid`. To try the recovery key (the GRUB menu can't be edited), run `systemd-cryptenroll --wipe-slot=tpm2 <dev>` over SSH, reboot and type the recovery key at the prompt, then re-enrol the TPM. |
-| Encryption, TPM and PIN | `--disk 64 --media-first --tpm` | As for the TPM, but the PIN is asked at every boot (a wrong PIN asks again, it doesn't restart). After the first boot the `systemd-tpm2` token has `tpm2-pin: true` and `tpm2-hash-pcrs: 7`, `/etc/atlas-installer/tpm-pin` is gone, and the second boot unlocks with the PIN. At the GRUB menu, `e` asks for a password. The recovery key works too. |
+| Encryption, TPM | `--disk 64 --media-first --tpm` | Choose "unlock with the TPM". The recovery key is shown. After the restart the system boots without a prompt. On the installed system `cryptsetup luksDump` shows two slots and one `systemd-tpm2` token with `tpm2-hash-pcrs: 7` (the first start sealed it: `atlas-tpm-seal.service` succeeded, `/etc/telamon-installer/` is empty), `/var/log/telamon-installer/` has `install.log` and `tpm-event-log.bin`, `lsblk` shows `luks-<uuid>` under the root partition, and `/proc/cmdline` has `rd.luks.uuid`. To try the recovery key (the GRUB menu can't be edited), run `systemd-cryptenroll --wipe-slot=tpm2 <dev>` over SSH, reboot and type the recovery key at the prompt, then re-enrol the TPM. |
+| Encryption, TPM and PIN | `--disk 64 --media-first --tpm` | As for the TPM, but the PIN is asked at every boot (a wrong PIN asks again, it doesn't restart). After the first boot the `systemd-tpm2` token has `tpm2-pin: true` and `tpm2-hash-pcrs: 7`, `/etc/telamon-installer/tpm-pin` is gone, and the second boot unlocks with the PIN. At the GRUB menu, `e` asks for a password. The recovery key works too. |
 | Encryption, password | `--disk 64 --media-first` (no `--tpm`: the choice is not offered) | Choose a password with a non-US keyboard layout. The boot prompt takes the password in that layout, and the recovery key also unlocks. |
 | Wi-Fi | `--disk 64 --media-first`, then `tests/vm/wifi-ap.sh <vm>` and restart the UI | Connect to AtlasTest (password atlastest123). The installed system has the keyfile (without `interface-name=`), and connects when `wifi-ap.sh <vm> ssh` brings the access point up there. |
 

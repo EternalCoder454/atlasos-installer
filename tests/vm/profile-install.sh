@@ -13,16 +13,16 @@
 set -euo pipefail
 
 disk=${1:?usage: profile-install.sh <disk id> [out dir]}
-out=${2:-/run/atlas-profile}
+out=${2:-/run/telamon-profile}
 [[ $disk =~ ^[a-z0-9]+$ ]] || {
 	echo "profile-install.sh: bad disk id: $disk" >&2
 	exit 2
 }
 rm -rf "$out"
 mkdir -p "$out"
-log=/run/atlas-installer/install.log
-helper=(net.eterneon.atlas.InstallerHelper /net/eterneon/atlas/InstallerHelper
-	net.eterneon.atlas.InstallerHelper1)
+log=/run/telamon-installer/install.log
+helper=(net.eterneon.telamon.InstallerHelper /net/eterneon/telamon/InstallerHelper
+	net.eterneon.telamon.InstallerHelper1)
 up() { cut -d' ' -f1 /proc/uptime; }
 
 disks=$(busctl --json=short call "${helper[@]}" ListDisks | python3 -c \
@@ -63,7 +63,7 @@ sample() {
 		echo "$t $(awk '/^(Dirty|Writeback):/ { printf "%s %s ", $1, $2 }' /proc/meminfo)" >>"$out/mem.txt"
 		echo "$t $(wc -l 2>/dev/null <"$log" || echo 0)" >>"$out/loglines.txt"
 		# the target root's mount options, each time they change
-		m=$(awk '$2 == "/run/atlas-target" { print $4 }' /proc/mounts)
+		m=$(awk '$2 == "/run/telamon-target" { print $4 }' /proc/mounts)
 		[ "$m" = "$last" ] || echo "$t ${m:-unmounted}" >>"$out/mounts.txt"
 		last=$m
 		sleep 1

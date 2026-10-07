@@ -6,10 +6,10 @@
 wait=1
 while :; do
 	start=$(date +%s)
-	/usr/bin/atlas-installer --fullscreen
+	/usr/bin/telamon-installer --fullscreen
 	if [ $(($(date +%s) - start)) -lt 10 ]; then
 		wait=$((wait * 2 > 30 ? 30 : wait * 2))
-		echo "atlas-installer-session: the installer exited at once; starting it again in $wait s" >&2
+		echo "telamon-installer-session: the installer exited at once; starting it again in $wait s" >&2
 	else
 		wait=1
 	fi

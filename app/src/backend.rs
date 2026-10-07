@@ -11,7 +11,7 @@ pub mod qobject {
 
     extern "RustQt" {
         #[qobject]
-        /// `ATLAS_INSTALLER_DEMO` is set: nothing shown is real.
+        /// `TELAMON_INSTALLER_DEMO` is set: nothing shown is real.
         #[qproperty(bool, demo)]
         /// Locale codes, `["de_DE.UTF-8", ...]`.
         #[qproperty(QString, languages_json, cxx_name = "languagesJson")]
@@ -63,7 +63,7 @@ pub mod qobject {
         #[qproperty(QString, result_json, cxx_name = "resultJson")]
         #[qproperty(bool, rebooting)]
         #[qproperty(QString, reboot_error, cxx_name = "rebootError")]
-        #[namespace = "atlas_installer"]
+        #[namespace = "telamon_installer"]
         type Backend = super::BackendRust;
 
         /// Reads the languages, layouts, disks and networks.
@@ -194,7 +194,7 @@ fn rt() -> &'static tokio::runtime::Runtime {
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("atlas-installer-rt")
+            .thread_name("telamon-installer-rt")
             .enable_all()
             .build()
             .expect("tokio runtime")
@@ -455,7 +455,7 @@ impl qobject::Backend {
                 Err(e) => {
                     // No helper (a desktop, a demo): the Disk page says so
                     eprintln!(
-                        "atlas-installer: couldn't ask for the install's state: {}",
+                        "telamon-installer: couldn't ask for the install's state: {}",
                         e.message
                     );
                     return;
@@ -473,7 +473,7 @@ impl qobject::Backend {
         if r != view::Reattach::Idle {
             // (the pages follow install_state, see Main.qml)
             eprintln!(
-                "atlas-installer: an install is already known to the helper; opening at {}",
+                "telamon-installer: an install is already known to the helper; opening at {}",
                 r.page()
             );
         }
@@ -630,7 +630,7 @@ impl qobject::Backend {
                     // NetworkManager at the first read, the page is skipped,
                     // like having no adapter.
                     Err(e) => {
-                        eprintln!("atlas-installer: couldn't read the networks: {e}");
+                        eprintln!("telamon-installer: couldn't read the networks: {e}");
                         if !*obj.wifi_loaded() {
                             let json = serde_json::to_string(&network::WifiState::default())
                                 .unwrap_or_else(|_| "{}".into());
@@ -730,7 +730,7 @@ impl qobject::Backend {
         let k = keymap.to_string();
         rt().spawn(async move {
             if let Err(e) = system::apply_keymap(&k).await {
-                eprintln!("atlas-installer: couldn't switch the keyboard to {k}: {e}");
+                eprintln!("telamon-installer: couldn't switch the keyboard to {k}: {e}");
             }
         });
     }
@@ -797,7 +797,10 @@ impl qobject::Backend {
         if args[..5].iter().any(|a| a.is_empty())
             || !matches!(args[2].as_str(), "erase" | "free-space")
         {
-            eprintln!("atlas-installer: refusing to install with {:?}", &args[..5]);
+            eprintln!(
+                "telamon-installer: refusing to install with {:?}",
+                &args[..5]
+            );
             return false;
         }
         // The password or PIN goes to the helper for those modes only, and
@@ -810,7 +813,7 @@ impl qobject::Backend {
         };
         if !password_ok {
             eprintln!(
-                "atlas-installer: refusing to install with encryption {:?}",
+                "telamon-installer: refusing to install with encryption {:?}",
                 args[6]
             );
             return false;
@@ -818,7 +821,7 @@ impl qobject::Backend {
         let apps = match view::parse_apps(&apps.to_string()) {
             Ok(a) => a,
             Err(e) => {
-                eprintln!("atlas-installer: refusing to install: {e}");
+                eprintln!("telamon-installer: refusing to install: {e}");
                 return false;
             }
         };

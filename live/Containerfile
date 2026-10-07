@@ -1,4 +1,4 @@
-# The live session on the AtlasOS ISO: the published image plus what a live
+# The live session on the Telamon OS ISO: the published image plus what a live
 # boot needs. It is never installed: the installer copies the published image
 # underneath it (embedded by iso/build-iso.sh), not this one.
 #

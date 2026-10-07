@@ -1,4 +1,4 @@
-"""Tests for atlas-first-boot-apps, with fake flatpak/mise/toolbox/curl/gdbus on PATH.
+"""Tests for telamon-first-boot-apps, with fake flatpak/mise/toolbox/curl/gdbus on PATH.
 
 The script is imported and its module globals are patched (paths, checksum, root
 checks); the production script has no environment overrides.
@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
-SCRIPT = HERE.parent / "atlas-first-boot-apps"
+SCRIPT = HERE.parent / "telamon-first-boot-apps"
 CATALOG = HERE.parent / "apps.json"
 
 _loader = importlib.machinery.SourceFileLoader("fba", str(SCRIPT))
@@ -56,6 +56,9 @@ class Base(unittest.TestCase):
             p.write_text(FAKE)
             p.chmod(p.stat().st_mode | stat.S_IXUSR)
         self.record, self.status, self.log = t / "rec.json", t / "rec.status", t / "log"
+        # What it was called before the rename: nothing there unless a test puts it.
+        self.old_record, self.old_status, self.old_state = t / "old" / "rec.json", t / "old" / "rec.status", t / "old" / "state"
+        self.old_record.parent.mkdir()
         self.log.touch()
         (t / "os-release").write_text('NAME=Fedora\nVERSION_ID=44\n')
         env = {"PATH": "%s:/usr/bin:/bin" % self.bin, "FAKE_LOG": str(self.log),
@@ -64,7 +67,8 @@ class Base(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         for k, v in dict(RECORD=self.record, STATUS=self.status, CATALOG=CATALOG,
-                         STATE_DIR=self.state, BIN_DIR=self.home / "bin", OS_RELEASE=t / "os-release", PCI_DEVICES=t / "no-pci",
+                         LEGACY_RECORD=self.old_record, LEGACY_STATUS=self.old_status,
+                         STATE_DIR=self.state, LEGACY_STATE_DIR=self.old_state, BIN_DIR=self.home / "bin", OS_RELEASE=t / "os-release", PCI_DEVICES=t / "no-pci",
                          RUNTIME_DIR=self.run_dir, REQUIRE_ROOT=False, CHECK_OWNER=False,
                          MISE_SHA256=hashlib.sha256(MISE_BODY.encode()).hexdigest()).items():
             q = mock.patch.object(fba, k, v)
@@ -308,6 +312,124 @@ class UserMode(Base):
         self.status.write_text("[1]")
         self.assertEqual(self.run_mode("user"), 0)
         self.assertEqual(self.calls("gdbus"), [])
+
+
+class UnderTheOldNames(Base):
+    """A machine whose first start began (or ended) as atlas-first-boot-apps."""
+
+    def write_old_record(self, apps):
+        self.old_record.write_text(json.dumps({"version": 1, "apps": apps}))
+
+    def test_a_finished_first_start_does_not_run_again(self):
+        # nothing is pending under either name: no record, no calls, in both modes
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.record.exists() or self.old_record.exists())
+
+    def test_the_old_record_is_read_and_moves_to_the_new_name(self):
+        self.write_old_record(["firefox", "gh"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertTrue(self.calls("flatpak install --system -y --noninteractive flathub org.mozilla.firefox"))
+        self.assertEqual(self.rec_apps(), ["gh"])
+        self.assertFalse(self.old_record.exists(), "the work left is only in one place")
+        self.assertEqual(self.st()["state"], "done")
+
+    def test_an_old_record_with_only_account_entries_moves_without_installing(self):
+        self.write_old_record(["gh", "debug"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.calls("flatpak"), [])
+        self.assertEqual(self.rec_apps(), ["gh", "debug"])
+        self.assertFalse(self.old_record.exists())
+
+    def test_the_new_record_wins_and_both_go_when_it_is_done(self):
+        self.write_record(["firefox"])
+        self.write_old_record(["brave", "firefox"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(len(self.calls("flatpak install")), 1)
+        self.assertFalse(self.record.exists() or self.old_record.exists())
+
+    def test_a_damaged_old_record_is_set_aside_without_retry(self):
+        self.old_record.write_text("not json")
+        self.assertEqual(self.run_mode("system"), fba.EX_PERMANENT)
+        self.assertFalse(self.old_record.exists())
+        self.assertTrue(self.old_record.with_name("rec.json.bad").exists())
+
+    def test_done_markers_under_the_old_name_count(self):
+        self.write_old_record(["gh", "debug"])
+        self.old_state.mkdir()
+        (self.old_state / "first-boot-apps.done").write_text("debug\ngh\n")
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(self.calls(), [], "nothing is installed again")
+        self.assertFalse((self.state / "first-boot-apps.done").exists())
+
+    def test_a_new_done_marker_keeps_what_the_old_one_said(self):
+        self.write_old_record(["gh", "debug"])
+        self.old_state.mkdir()
+        (self.old_state / "first-boot-apps.done").write_text("gh\n")
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertTrue(self.calls("toolbox create"))
+        self.assertFalse(self.calls("mise use"), "gh was done under the old name")
+        self.assertEqual(set((self.state / "first-boot-apps.done").read_text().split()), {"gh", "debug"})
+
+    def test_a_result_shown_under_the_old_name_is_not_shown_again(self):
+        self.old_state.mkdir()
+        stamp = "done:1"
+        (self.old_state / "first-boot-apps.notified").write_text(stamp + "\n")
+        self.old_status.write_text(json.dumps({"state": "done", "message": "", "apps": ["firefox"], "updated": 1}))
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(self.calls("gdbus"), [])
+
+    def test_a_result_waiting_under_the_old_name_is_shown_once(self):
+        self.old_status.write_text(json.dumps({"state": "done", "message": "", "apps": ["firefox"], "updated": 1}))
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(len(self.calls("gdbus")), 1)
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(len(self.calls("gdbus")), 1)
+
+    def test_a_new_status_replaces_the_old_one(self):
+        self.old_status.write_text(json.dumps({"state": "done", "message": "", "apps": ["x"], "updated": 1}))
+        self.write_record(["firefox"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertTrue(self.status.exists())
+        self.assertFalse(self.old_status.exists())
+
+
+class Packaging(unittest.TestCase):
+    """What firstboot/install.sh puts in an image: the old names still lead to the new files."""
+
+    def test_the_old_unit_and_script_names_are_links_to_the_new_ones(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run([str(HERE.parent / "install.sh"), d], check=True)
+            root = Path(d)
+            lib = root / "usr/lib/systemd"
+            for kind in ("system", "user"):
+                new, old = lib / kind / "telamon-first-boot-apps.service", lib / kind / "atlas-first-boot-apps.service"
+                self.assertTrue(new.is_file() and not new.is_symlink())
+                self.assertEqual(os.readlink(old), "telamon-first-boot-apps.service")
+                self.assertTrue(old.exists())
+            for target in ("multi-user.target", "graphical-session.target"):
+                kind = "system" if target == "multi-user.target" else "user"
+                for name in ("telamon", "atlas"):
+                    self.assertTrue((lib / kind / (target + ".wants") / (name + "-first-boot-apps.service")).exists(), name)
+            script = root / "usr/libexec/atlasos/atlas-first-boot-apps"
+            self.assertEqual(script.resolve(), (root / "usr/libexec/telamon/telamon-first-boot-apps").resolve())
+            self.assertTrue(os.access(script, os.X_OK))
+            catalog = root / "usr/share/atlasos/first-boot-apps.json"
+            self.assertEqual(catalog.read_bytes(), (root / "usr/share/telamon/first-boot-apps.json").read_bytes())
+            # one profile.d script activates mise; the old name is an empty stand-in
+            self.assertNotIn("activate", (root / "etc/profile.d/atlas-mise.sh").read_text())
+            self.assertIn("activate", (root / "etc/profile.d/telamon-mise.sh").read_text())
+
+    def test_both_names_of_the_record_start_the_units(self):
+        for unit in ("telamon-first-boot-apps.service", "telamon-first-boot-apps.user.service"):
+            text = (HERE.parent / "units" / unit).read_text()
+            for path in ("/var/lib/telamon/first-boot-apps.json", "/var/lib/atlasos/first-boot-apps.json"):
+                self.assertIn("ConditionPathExists=|" + path + "\n", text, unit)
+        user = (HERE.parent / "units" / "telamon-first-boot-apps.user.service").read_text()
+        for path in ("/var/lib/telamon/first-boot-apps.status", "/var/lib/atlasos/first-boot-apps.status"):
+            self.assertIn("ConditionPathExists=|" + path + "\n", user)
 
 
 class Notify(Base):

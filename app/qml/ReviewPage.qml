@@ -4,8 +4,8 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
-import net.eterneon.atlas.installer
+import Telamon.Ui
+import net.eterneon.telamon.installer
 
 // Step 6: everything in plain words, and exactly what happens to the disk.
 InstallerPage {
@@ -103,7 +103,7 @@ InstallerPage {
                 Layout.fillWidth: true
                 shown: page.app.backend.nvidia && page.app.backend.secureBoot
                 type: "info"
-                text: qsTr("Secure Boot is on, so the NVIDIA driver needs the AtlasOS key. After the restart, a blue screen asks you to enroll it, once. The last page shows the password and the steps.")
+                text: qsTr("Secure Boot is on, so the NVIDIA driver needs the Telamon OS key. After the restart, a blue screen asks you to enroll it, once. The last page shows the password and the steps.")
             }
 
             InfoBanner {

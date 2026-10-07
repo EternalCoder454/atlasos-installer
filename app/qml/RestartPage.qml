@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // Step 8: done. Restart, plus the NVIDIA key steps when the helper queued
 // the key, and anything that went wrong without failing the install.
@@ -20,11 +20,11 @@ InstallerPage {
     // The key was shown to be written down: Restart waits for the tick.
     property bool keySaved: false
 
-    title: qsTr("AtlasOS is installed")
+    title: qsTr("Telamon OS is installed")
     // Afterwards, not before: the helper restarts without the stick, but the
-    // firmware is told to start AtlasOS next either way, so it can stay in.
-    subtitle: page.result.bootMedia === "cd" ? qsTr("Restart, then take out the disc while AtlasOS starts.")
-            : page.result.bootMedia === "usb" ? qsTr("Restart, then take out the USB stick while AtlasOS starts.")
+    // firmware is told to start Telamon OS next either way, so it can stay in.
+    subtitle: page.result.bootMedia === "cd" ? qsTr("Restart, then take out the disc while Telamon OS starts.")
+            : page.result.bootMedia === "usb" ? qsTr("Restart, then take out the USB stick while Telamon OS starts.")
             : qsTr("Restart, then take out the USB stick or disc you started from.")
     backVisible: false
     primaryText: page.backend.rebooting ? qsTr("Restarting…") : qsTr("Restart")
@@ -50,14 +50,14 @@ InstallerPage {
                        ? qsTr("Windows is still there: choose it in the menu when the computer starts.") + " "
                        : "")
                       + (page.mok.length > 0
-                         ? qsTr("Once AtlasOS starts, you'll create your account.")
+                         ? qsTr("Once Telamon OS starts, you'll create your account.")
                          : qsTr("After the restart, you'll create your account."))
             }
 
             Section {
                 visible: page.recoveryKey.length > 0
                 title: qsTr("Recovery key")
-                footer: qsTr("AtlasOS can't show it again after the restart.")
+                footer: qsTr("Telamon OS can't show it again after the restart.")
 
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -67,14 +67,14 @@ InstallerPage {
                     QQC2.Label {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        text: qsTr("Write it down or take a photo with your phone, and keep it away from this PC. You need it if AtlasOS ever asks for it, for example after a firmware or security-chip change, or if the disk moves to another PC.")
+                        text: qsTr("Write it down or take a photo with your phone, and keep it away from this PC. You need it if Telamon OS ever asks for it, for example after a firmware or security-chip change, or if the disk moves to another PC.")
                     }
                     Rectangle {
                         Layout.alignment: Qt.AlignHCenter
                         implicitWidth: Math.min(keyColumn.implicitWidth + Kirigami.Units.gridUnit * 2, parent.width)
                         implicitHeight: keyColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
-                        radius: AtlasStyle.radiusLarge
-                        color: AtlasStyle.selection
+                        radius: TelamonStyle.radiusLarge
+                        color: TelamonStyle.selection
                         ColumnLayout {
                             id: keyColumn
                             anchors.centerIn: parent
@@ -88,8 +88,8 @@ InstallerPage {
                                     readOnly: true
                                     selectByMouse: true
                                     color: Kirigami.Theme.textColor
-                                    selectionColor: AtlasStyle.accent
-                                    selectedTextColor: AtlasStyle.accentText
+                                    selectionColor: TelamonStyle.accent
+                                    selectedTextColor: TelamonStyle.accentText
                                     font.family: "monospace"
                                     font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
                                     font.weight: Font.DemiBold
@@ -100,7 +100,7 @@ InstallerPage {
                             }
                         }
                     }
-                    // Atlas.Ui's switch, as on the Disk page: Breeze's
+                    // Telamon.Ui's switch, as on the Disk page: Breeze's
                     // check box is a near-invisible square in AtlasOS Dark,
                     // and this one gates Restart.
                     RowLayout {
@@ -114,7 +114,7 @@ InstallerPage {
                                 onTapped: savedSwitch.toggle()
                             }
                         }
-                        AtlasSwitch {
+                        TelamonSwitch {
                             id: savedSwitch
                             onCheckedChanged: page.keySaved = checked
                             Accessible.name: qsTr("I've saved my recovery key")
@@ -126,7 +126,7 @@ InstallerPage {
             Section {
                 visible: page.mok.length > 0
                 title: qsTr("One more step for NVIDIA graphics")
-                footer: qsTr("This happens once. If you miss the blue screen, AtlasOS starts with basic graphics; open a terminal and run “sudo /usr/libexec/atlasos/nvidia-enroll-key” to try again.")
+                footer: qsTr("This happens once. If you miss the blue screen, Telamon OS starts with basic graphics; open a terminal and run “sudo /usr/libexec/atlasos/nvidia-enroll-key” to try again.")
 
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -136,7 +136,7 @@ InstallerPage {
                     QQC2.Label {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        text: qsTr("Secure Boot is on, so the computer must trust the AtlasOS key before the NVIDIA driver can load. After the restart a blue screen appears. It waits only 10 seconds, so stay close:")
+                        text: qsTr("Secure Boot is on, so the computer must trust the Telamon OS key before the NVIDIA driver can load. After the restart a blue screen appears. It waits only 10 seconds, so stay close:")
                     }
                     Repeater {
                         model: [
@@ -168,8 +168,8 @@ InstallerPage {
                         Layout.topMargin: Kirigami.Units.smallSpacing
                         implicitWidth: pw.implicitWidth + Kirigami.Units.gridUnit * 2
                         implicitHeight: pw.implicitHeight + Kirigami.Units.largeSpacing * 2
-                        radius: AtlasStyle.radiusLarge
-                        color: AtlasStyle.selection
+                        radius: TelamonStyle.radiusLarge
+                        color: TelamonStyle.selection
                         QQC2.Label {
                             id: pw
                             anchors.centerIn: parent
@@ -187,7 +187,7 @@ InstallerPage {
             Section {
                 visible: (page.result.warnings || []).length > 0
                 title: qsTr("Worth knowing")
-                footer: qsTr("AtlasOS works despite these. The install log is at %1 until the computer restarts.").arg(page.result.log || "/run/atlas-installer/install.log")
+                footer: qsTr("Telamon OS works despite these. The install log is at %1 until the computer restarts.").arg(page.result.log || "/run/telamon-installer/install.log")
                 Repeater {
                     model: page.result.warnings || []
                     SectionRow {

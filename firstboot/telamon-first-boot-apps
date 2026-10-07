@@ -1,12 +1,15 @@
 #!/usr/bin/python3
-"""Install the apps chosen in the AtlasOS installer, at the first start.
+"""Install the apps chosen in the Telamon OS installer, at the first start.
 
   system  (root, once)       flatpak entries, system-wide from Flathub
   user    (each account)     mise and mise tools, toolbox packages
 
-The record is /var/lib/atlasos/first-boot-apps.json, written by the installer.
-Its ids are only ever looked up in the catalog: nothing in it is executed or
-used as a URL. See firstboot/README.md.
+The record is /var/lib/telamon/first-boot-apps.json, written by the installer
+(and, for one release, /var/lib/atlasos/first-boot-apps.json, where Atlas
+Installer wrote it: either is read, and a machine that started the first boot
+under the old names carries on and is not started again). Its ids are only ever
+looked up in the catalog: nothing in it is executed or used as a URL. See
+firstboot/README.md.
 """
 import hashlib
 import json
@@ -27,9 +30,15 @@ MISE_URL = ("https://github.com/jdx/mise/releases/download/%s/mise-%s-linux-x64"
 MISE_SHA256 = "8d48bc510b7d844fad0bc7156c0855c2a1e7230c51e498a7f6b63b021f8b57c5"
 FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
-RECORD = Path("/var/lib/atlasos/first-boot-apps.json")
-STATUS = Path("/var/lib/atlasos/first-boot-apps.status")
-CATALOG = Path("/usr/share/atlasos/first-boot-apps.json")
+RECORD = Path("/var/lib/telamon/first-boot-apps.json")
+STATUS = Path("/var/lib/telamon/first-boot-apps.status")
+CATALOG = Path("/usr/share/telamon/first-boot-apps.json")
+# What these were called until the rename (atlas-first-boot-apps). A record, a
+# status or a done marker under the old name still counts; what this script
+# writes goes under the new one, and the old record is removed with the new.
+LEGACY_RECORD = Path("/var/lib/atlasos/first-boot-apps.json")
+LEGACY_STATUS = Path("/var/lib/atlasos/first-boot-apps.status")
+LEGACY_STATE_DIR = Path.home() / ".local/state/telamon"
 OS_RELEASE = Path("/etc/os-release")
 PCI_DEVICES = Path("/sys/bus/pci/devices")
 STATE_DIR = Path.home() / ".local/state/atlasos"
@@ -58,7 +67,7 @@ class Failed(Exception):
 
 
 def log(msg):
-    print("atlas-first-boot-apps: " + msg, file=sys.stderr, flush=True)
+    print("telamon-first-boot-apps: " + msg, file=sys.stderr, flush=True)
 
 
 def read_json(path, kind):
@@ -97,12 +106,33 @@ def write_atomic(path, text, mode=0o644):
         os.close(dfd)
 
 
+def existing(*paths):
+    """The first of `paths` that exists (a dangling link or an unreadable one does
+    not count), or None."""
+    for p in paths:
+        try:
+            p.stat()
+        except OSError:
+            continue
+        return p
+    return None
+
+
+def record_path():
+    """The record to read: the new one, else the one Atlas Installer wrote."""
+    return existing(RECORD, LEGACY_RECORD)
+
+
+def status_path():
+    return existing(STATUS, LEGACY_STATUS)
+
+
 def load_catalog():
     try:
         entries = read_json(CATALOG, list)
     except (OSError, ValueError) as e:
         log("cannot read the catalog %s: %s" % (CATALOG, e))
-        raise Failed("The app list for this version of AtlasOS is missing.", retry=False)
+        raise Failed("The app list for this version of Telamon OS is missing.", retry=False)
     cat = {}
     for e in entries:
         if isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("install"), str):
@@ -138,8 +168,11 @@ def has_amd_gpu():
 def load_record(check_owner=False):
     """Return the record's ids, None when there is no record. Raises Failed (permanent)
     when the record is damaged, the wrong version, or not owned by root."""
+    path = record_path()
+    if path is None:
+        return None
     try:
-        st = RECORD.stat()
+        st = path.stat()
     except FileNotFoundError:
         return None
     except OSError as e:
@@ -147,11 +180,11 @@ def load_record(check_owner=False):
     if check_owner and CHECK_OWNER and (st.st_uid != 0 or st.st_mode & 0o022):
         raise Failed("The saved app list is not owned by the system, so it was ignored.", retry=False)
     try:
-        rec = read_json(RECORD, dict)
+        rec = read_json(path, dict)
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as e:
-        log("cannot read %s: %s" % (RECORD, e))
+        log("cannot read %s: %s" % (path, e))
         raise Failed("The saved app list is damaged.", retry=False)
     if rec.get("version") != 1 or not isinstance(rec.get("apps"), list):
         raise Failed("The saved app list is from an unknown version.", retry=False)
@@ -235,29 +268,42 @@ def write_status(state, message, apps, failed=(), unknown=(), permanent=False):
            "unknown": list(unknown), "permanent": permanent}
     if state != "running":  # an unchanged result keeps its stamp, so it is shown only once
         try:
-            old = read_json(STATUS, dict)
+            old = read_json(status_path() or STATUS, dict)
             if {k: old.get(k) for k in new} == new:
                 return
         except (OSError, ValueError):
             pass
     new["updated"] = int(time.time())
     write_atomic(STATUS, json.dumps(new) + "\n")
+    unlink_quietly(LEGACY_STATUS)
+
+
+def unlink_quietly(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def save_record(ids):
+    """The record under the new name, and none under the old one: the work
+    left is only ever in one place."""
     if ids:
         write_atomic(RECORD, json.dumps({"version": 1, "apps": ids}) + "\n")
     else:
-        os.unlink(RECORD)
+        unlink_quietly(RECORD)
+    unlink_quietly(LEGACY_RECORD)
 
 
 def refuse_record(reason):
     """A record that can never work: set it aside, say so, and do not retry."""
-    bad = RECORD.with_name(RECORD.name + ".bad")
-    try:
-        os.rename(RECORD, bad)
-    except OSError as e:
-        log("cannot move %s aside: %s" % (RECORD, e))
+    for rec in (RECORD, LEGACY_RECORD):
+        if not rec.exists():
+            continue
+        try:
+            os.rename(rec, rec.with_name(rec.name + ".bad"))
+        except OSError as e:
+            log("cannot move %s aside: %s" % (rec, e))
     try:
         write_status("failed", reason, [], permanent=True)
     except OSError as e:
@@ -311,9 +357,10 @@ def system_mode():
                     remaining.remove(i)
                     save_record(remaining)
     if not remaining:
-        if os.path.exists(RECORD):
+        if record_path() is not None:
             save_record([])
-    elif remaining != ids:
+    elif remaining != ids or record_path() == LEGACY_RECORD:
+        # (a record found under the old name moves to the new one)
         save_record(remaining)
     if failed:
         write_status("failed", reason, names, failed, unknown, permanent)
@@ -337,7 +384,7 @@ def notify(summary, body=""):
     run(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications",
          "--object-path", "/org/freedesktop/Notifications",
          "--method", "org.freedesktop.Notifications.Notify",
-         "'Atlas'", "0", "''", gv(summary), gv(body), "[]", "{}", "8000"], 15)
+         "'Telamon'", "0", "''", gv(summary), gv(body), "[]", "{}", "8000"], 15)
 
 
 def once_per_boot(name):
@@ -345,7 +392,7 @@ def once_per_boot(name):
     if RUNTIME_DIR is None:
         return True
     try:
-        fd = os.open(RUNTIME_DIR / ("atlas-first-boot-apps." + name),
+        fd = os.open(RUNTIME_DIR / ("telamon-first-boot-apps." + name),
                      os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         return False
@@ -367,8 +414,19 @@ def read_lines(path):
         return set()
 
 
+def legacy_state(path):
+    """The file of `path`'s name in the state folder of Atlas's first start."""
+    return LEGACY_STATE_DIR / Path(path).name
+
+
+def read_state(path):
+    """The lines of a state file under the new name and under the old one: what a
+    user's first start did under the old name is done."""
+    return read_lines(path) | read_lines(legacy_state(path))
+
+
 def add_line(path, line):
-    write_atomic(path, "\n".join(sorted(read_lines(path) | {line})) + "\n", 0o600)
+    write_atomic(path, "\n".join(sorted(read_state(path) | {line})) + "\n", 0o600)
 
 
 def failed_mark(i):
@@ -458,7 +516,7 @@ def user_mode():
         except Failed as e:
             log(e.reason)
             return 0
-        seen = read_lines(STATE_DIR / "first-boot-apps.done")
+        seen = read_state(STATE_DIR / "first-boot-apps.done")
         todo = [e for e in entries if e[1] != "flatpak" and e[0] not in seen
                 and failed_mark(e[0]) not in seen]
         if todo:
@@ -508,7 +566,7 @@ def report_flatpak():
     seen = STATE_DIR / "first-boot-apps.notified"
     for _ in range(60):  # wait up to about 30 minutes for a running install
         try:
-            st = read_json(STATUS, dict)
+            st = read_json(status_path() or STATUS, dict)
         except (OSError, ValueError):
             return
         if st.get("state") != "running":
@@ -520,7 +578,7 @@ def report_flatpak():
     else:
         return
     state, stamp = st.get("state"), "%s:%s" % (st.get("state"), st.get("updated"))
-    if state not in ("done", "failed", "partial") or stamp in read_lines(seen):
+    if state not in ("done", "failed", "partial") or stamp in read_state(seen):
         return
     msg = st.get("message") if isinstance(st.get("message"), str) else "Something went wrong."
     if state == "done":
@@ -535,7 +593,7 @@ def report_flatpak():
 
 def main(argv):
     if len(argv) != 2 or argv[1] not in ("system", "user"):
-        print("usage: atlas-first-boot-apps system|user", file=sys.stderr)
+        print("usage: telamon-first-boot-apps system|user", file=sys.stderr)
         return 2
     try:
         return system_mode() if argv[1] == "system" else user_mode()

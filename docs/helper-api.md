@@ -1,7 +1,7 @@
-# atlas-installer-helper D-Bus API
+# telamon-installer-helper D-Bus API
 
 The installer's root helper. It runs only in the live session and is started
-by D-Bus activation through systemd (`atlas-installer-helper.service`). It
+by D-Bus activation through systemd (`telamon-installer-helper.service`). It
 exits after 60 seconds without calls, unless an install has started or the
 computer is restarting: then it stays until systemd stops it, so a result
 nobody has read yet, or the busy flag, is not lost. A stop (SIGTERM) waits
@@ -12,10 +12,10 @@ running, to finish. It is modelled on Atlas Updater's
 | | |
 |---|---|
 | Bus | system |
-| Name | `net.eterneon.atlas.InstallerHelper` |
-| Object | `/net/eterneon/atlas/InstallerHelper` |
-| Interface | `net.eterneon.atlas.InstallerHelper1` |
-| Binary | `/usr/libexec/atlas-installer-helper` |
+| Name | `net.eterneon.telamon.InstallerHelper` |
+| Object | `/net/eterneon/telamon/InstallerHelper` |
+| Interface | `net.eterneon.telamon.InstallerHelper1` |
+| Binary | `/usr/libexec/telamon-installer-helper` |
 
 Polkit checks every call, using the caller's bus name as the subject.
 
@@ -23,7 +23,7 @@ Polkit checks every call, using the caller's bus name as the subject.
 
 ### `ListDisks() → s`
 
-Polkit action: `net.eterneon.atlas.installer.list-disks`. An active local
+Polkit action: `net.eterneon.telamon.installer.list-disks`. An active local
 session is allowed without authentication.
 
 Returns JSON with `disks`, `hidden`, `tpm2`, `secure_boot` and
@@ -72,7 +72,7 @@ To read EFI partitions, ListDisks mounts them read-only.
 
 ### `Install(disk_id s, fingerprint s, mode s, locale s, keymap s, wifi_uuid s, encryption s, password s, apps as) → s`
 
-Polkit action: `net.eterneon.atlas.installer.install`. An active local
+Polkit action: `net.eterneon.telamon.installer.install`. An active local
 session needs admin authentication (`auth_admin_keep`). Other sessions are
 refused.
 
@@ -85,7 +85,7 @@ refused.
 | `wifi_uuid` | A NetworkManager connection to copy into the new system, or an empty string. |
 | `encryption` | `none`, `tpm`, `tpm-pin` or `password`: how the root partition is encrypted (see below). Anything else is refused. `tpm` and `tpm-pin` are refused when ListDisks said `tpm2` is false. |
 | `password` | For `password`: the disk password, 8 to 256 characters. For `tpm-pin`: the PIN, 4 to 64 characters. Printable ASCII only (space to `~`): the initramfs prompt can't reliably type anything else (keymaps, dead keys, normalisation). An empty string for `none` and `tpm`; anything else is refused. |
-| `apps` | IDs from `firstboot/apps.json` (the "Choose your apps" page): each on the list, none twice, at most one browser. Anything else is refused. The install is offline, so it only records them in the new system as `/var/lib/atlasos/first-boot-apps.json` (`{"version": 1, "apps": [...]}`, root-owned, 0644); the new system adds them once it is online. Nothing is written for an empty list, and a failure to write it is a warning, not a failed install. |
+| `apps` | IDs from `firstboot/apps.json` (the "Choose your apps" page): each on the list, none twice, at most one browser. Anything else is refused. The install is offline, so it only records them in the new system as `/var/lib/telamon/first-boot-apps.json` (`{"version": 1, "apps": [...]}`, root-owned, 0644) and, with the same content, as `/var/lib/atlasos/first-boot-apps.json` (where Atlas Installer put it; the first-start script of an image built before the rename reads that one, the new script reads either and removes both when it is done); the new system adds them once it is online. Nothing is written for an empty list, and a failure to write it is a warning, not a failed install. |
 
 Install probes the disks again and decides everything before it writes
 anything. It refuses in these cases:
@@ -107,7 +107,7 @@ Install returns this JSON:
  "encryption": "tpm",
  "windows_entry": true,
  "boot_media": "cd" | "usb" | "",
- "warnings": ["..."], "log": "/run/atlas-installer/install.log"}
+ "warnings": ["..."], "log": "/run/telamon-installer/install.log"}
 ```
 
 `recovery_key` is set when `encryption` is `tpm`, `tpm-pin` or `password`: eight
@@ -122,7 +122,7 @@ boot prompt works with the user's keyboard layout (see the kargs below).
 `boot_media` is what the installer was started from, so the UI can say
 what to take out once the computer restarts: an optical drive, a USB disk,
 or neither (an internal disk, or not found). The install sets the
-firmware's BootNext to the new AtlasOS entry, so leaving it in is safe.
+firmware's BootNext to the new Telamon OS entry, so leaving it in is safe.
 
 `warnings` covers things that went wrong without failing the install: the
 firmware entry could not be renamed, an SELinux label was not set, the NVIDIA
@@ -144,7 +144,7 @@ call asks `Status` instead of reporting a failure.
 
 ### `Status() → s`
 
-Polkit action: `net.eterneon.atlas.installer.list-disks` (active local
+Polkit action: `net.eterneon.telamon.installer.list-disks` (active local
 session, no authentication). Works at any time, also while installing.
 
 Returns the state of the install this helper has run, kept until the
@@ -152,7 +152,7 @@ helper stops:
 
 ```json
 {"state": "idle" | "installing" | "done" | "failed",
- "step": "copy", "fraction": 0.42, "text": "Copying AtlasOS",
+ "step": "copy", "fraction": 0.42, "text": "Copying Telamon OS",
  "result": null | { Install's JSON }, "error": null | "message"}
 ```
 
@@ -164,7 +164,7 @@ helper stops:
 | `failed` | `error` is the text Install's `Failed` error carried. |
 
 `result.mok_password` and `result.recovery_key` are filled only for a caller
-that polkit would let install (`net.eterneon.atlas.installer.install`)
+that polkit would let install (`net.eterneon.telamon.installer.install`)
 without asking: the check runs with no interaction. For anyone else they are
 `null`. Neither is ever logged, and neither is the disk password.
 
@@ -180,7 +180,7 @@ helper restarted) and counts as a failure.
 
 ### `Reboot()`
 
-Polkit action: `net.eterneon.atlas.installer.reboot`. An active local
+Polkit action: `net.eterneon.telamon.installer.reboot`. An active local
 session is allowed without authentication.
 
 Reboot is refused while an install is running. Once the reboot has started,
@@ -224,11 +224,11 @@ seconds, even when unchanged, so a UI can keep a time estimate current.
 
 | Error | When |
 |---|---|
-| `net.eterneon.atlas.Error.InvalidArgument` | An argument is malformed, or the fingerprint is missing. |
-| `net.eterneon.atlas.Error.NotAuthorized` | Polkit refused the call. |
-| `net.eterneon.atlas.Error.Busy` | An install is running, or the computer is restarting. |
-| `net.eterneon.atlas.Error.ShuttingDown` | The helper is exiting. Call again. |
-| `net.eterneon.atlas.Error.Failed` | The text says what happened. The install log has the details. |
+| `net.eterneon.telamon.Error.InvalidArgument` | An argument is malformed, or the fingerprint is missing. |
+| `net.eterneon.telamon.Error.NotAuthorized` | Polkit refused the call. |
+| `net.eterneon.telamon.Error.Busy` | An install is running, or the computer is restarting. |
+| `net.eterneon.telamon.Error.ShuttingDown` | The helper is exiting. Call again. |
+| `net.eterneon.telamon.Error.Failed` | The text says what happened. The install log has the details. |
 
 ## Disk encryption
 
@@ -236,7 +236,7 @@ With `encryption` `tpm`, `tpm-pin` or `password`, only the root partition
 is encrypted (LUKS2); the ESP and `/boot` stay plain. In the Format stage,
 for the root partition `<node>`, with a random UUID `<uuid>` and a random
 64-byte temporary key (a file `0600` in a `0700` directory under
-`/run/atlas-installer`, deleted whatever happens):
+`/run/telamon-installer`, deleted whatever happens):
 
 1. `wipefs --all --quiet <node>`
 2. `cryptsetup luksFormat --type luks2 --batch-mode --uuid <uuid> --label atlasos --key-file <key> <node>`
@@ -275,11 +275,11 @@ policy, and the installed system ties it to its own PCR 7 when it first
 starts. In the Settings stage, for `tpm` and `tpm-pin`, the helper writes
 into the deployment's `/etc` (labelled like the settings files):
 
-- `/etc/systemd/system/atlas-tpm-seal.service` (0644), enabled by the link
-  `multi-user.target.wants/atlas-tpm-seal.service` → `../atlas-tpm-seal.service`
-- `/etc/atlas-installer/` (0700) `tpm-seal` (0600): the service runs at
+- `/etc/systemd/system/telamon-tpm-seal.service` (0644), enabled by the link
+  `multi-user.target.wants/telamon-tpm-seal.service` → `../telamon-tpm-seal.service`
+- `/etc/telamon-installer/` (0700) `tpm-seal` (0600): the service runs at
   each start while this file exists
-- `tpm-pin` only: `/etc/atlas-installer/tpm-pin` (0600, the PIN with no
+- `tpm-pin` only: `/etc/telamon-installer/tpm-pin` (0600, the PIN with no
   newline), on the encrypted root
 
 The service runs `systemd-cryptenroll --unlock-tpm2-device=auto
@@ -293,7 +293,7 @@ key. When it succeeds it removes the PIN file and `tpm-seal`; when it fails
 (the journal has the tool's words) both stay and it tries again at the next
 start. It never prompts (a missing PIN fails it at once) and it isn't
 ordered against the boot targets, so it doesn't hold up the login screen. It
-is sandboxed (`ProtectSystem=strict` with only `/etc/atlas-installer`
+is sandboxed (`ProtectSystem=strict` with only `/etc/telamon-installer`
 writable, no network, a system-call filter, and no capability beyond
 `CAP_DAC_OVERRIDE` and `CAP_IPC_LOCK`). Writing `tpm-seal` again (and the
 PIN, with a PIN) seals the disk anew to the current PCR 7.
@@ -301,7 +301,7 @@ PIN, with a PIN) seals the disk anew to the current PCR 7.
 Until a seal has worked, the TPM unlocks the disk for any system started on
 this PC (the PIN is still needed with `tpm-pin`). That lasts as long as the
 seal keeps failing (the journal says why), and the PIN stays in
-`/etc/atlas-installer` meanwhile. Someone who unlocked the disk in that time
+`/etc/telamon-installer` meanwhile. Someone who unlocked the disk in that time
 has its volume key, which sealing afterwards doesn't change.
 
 A failing step stops the install with "Setting up encryption failed while
@@ -385,7 +385,7 @@ writes one out.
 
    If no ESP qualifies, it makes a new 600 MiB one.
 2. Run the safety checks, then format (see "Disk encryption" for an
-   encrypted root) and mount at `/run/atlas-target`.
+   encrypted root) and mount at `/run/telamon-target`.
 3. Run `bootc install to-filesystem`, from the image embedded in the live
    system:
    - `ghcr.io/eternalcoder454/atlasos:stable`, or
@@ -396,35 +396,37 @@ writes one out.
    - `locale.conf`
    - `vconsole.conf`
    - `X11/xorg.conf.d/00-keyboard.conf`
-   - `atlasos/installer.ini` (0644): `[Installer]` with `Version=1`,
+   - `telamon/installer.ini` (0644): `[Installer]` with `Version=1`,
      `Language`, `KeyboardLayout`, `KeyboardVariant` and `Network` (true
      when a Wi-Fi connection is carried over or a real Ethernet device has
-     a cable in). AtlasOS's first-run wizard reads it and skips the
-     language and keyboard pages, and the Wi-Fi page when it's online.
+     a cable in). The first-run wizard reads it and skips the language and
+     keyboard pages, and the Wi-Fi page when it's online. The same file is
+     also written as `atlasos/installer.ini`, where Atlas Installer put it, for
+     the wizard of an image built before the rename (Telamon Setup reads either).
    - the Wi-Fi keyfile, with `permissions=` removed and mode 0600
 
    Label them with the new system's own SELinux policy (`setfiles -r`).
 5. With Windows on a surviving ESP: write `/boot/grub2/custom.cfg`, which
    chainloads Windows and sets `timeout=5`.
-6. Create the "AtlasOS" firmware boot entry, then delete bootupd's "Fedora"
+6. Create the "Telamon OS" firmware boot entry, then delete bootupd's "Fedora"
    entry for that ESP.
 7. NVIDIA with Secure Boot on and the key not enrolled: queue
    `mokutil --import` with a random 8-digit password, which Install returns.
 8. Unmount.
 
 Every command and its output, except secrets, go to
-`/run/atlas-installer/install.log` (mode 0600). Before unmounting, the
+`/run/telamon-installer/install.log` (mode 0600). Before unmounting, the
 helper keeps a copy of it, and of the firmware's TPM event log
 (`/sys/kernel/security/tpm0/binary_bios_measurements`, when there is one),
-in the new system as `/var/log/atlas-installer/install.log` and
+in the new system as `/var/log/telamon-installer/install.log` and
 `tpm-event-log.bin` (mode 0600, in a 0700 directory). They hold this PC's
 disk layout and labels, no secrets. A failure there only goes into the log.
 
 ## Command line (root only, for testing)
 
 ```
-atlas-installer-helper --list
-atlas-installer-helper --plan <disk> erase|free-space [locale] [keymap] [wifi-uuid] [none|tpm|tpm-pin|password]
+telamon-installer-helper --list
+telamon-installer-helper --plan <disk> erase|free-space [locale] [keymap] [wifi-uuid] [none|tpm|tpm-pin|password]
 ```
 
 `--plan` is a dry run: it prints the plan, including the encryption steps and
@@ -434,8 +436,8 @@ kernel arguments, and writes nothing. It never takes a password.
 
 | Path | Source in this repo |
 |---|---|
-| `/usr/libexec/atlas-installer-helper` | built from `helper/` |
-| `/usr/share/dbus-1/system.d/net.eterneon.atlas.InstallerHelper.conf` | `helper/data/dbus-1/system.d/` |
-| `/usr/share/dbus-1/system-services/net.eterneon.atlas.InstallerHelper.service` | `helper/data/dbus-1/system-services/` |
-| `/usr/share/polkit-1/actions/net.eterneon.atlas.installer.policy` | `helper/data/polkit-1/actions/` |
-| `/usr/lib/systemd/system/atlas-installer-helper.service` | `helper/data/systemd/` |
+| `/usr/libexec/telamon-installer-helper` | built from `helper/` |
+| `/usr/share/dbus-1/system.d/net.eterneon.telamon.InstallerHelper.conf` | `helper/data/dbus-1/system.d/` |
+| `/usr/share/dbus-1/system-services/net.eterneon.telamon.InstallerHelper.service` | `helper/data/dbus-1/system-services/` |
+| `/usr/share/polkit-1/actions/net.eterneon.telamon.installer.policy` | `helper/data/polkit-1/actions/` |
+| `/usr/lib/systemd/system/telamon-installer-helper.service` | `helper/data/systemd/` |

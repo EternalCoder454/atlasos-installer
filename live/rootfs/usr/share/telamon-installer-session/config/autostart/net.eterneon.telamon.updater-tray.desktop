@@ -1,0 +1,7 @@
+# Nothing to update in the live session. (The tray is net.eterneon.atlas.updater-tray
+# until the updater is renamed: both are hidden here, so either image works.)
+[Desktop Entry]
+Type=Application
+Name=Telamon Updater (tray)
+Exec=telamon-updater --tray
+Hidden=true

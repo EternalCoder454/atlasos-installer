@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Install AtlasOS
-Comment=Install AtlasOS on this computer
-Exec=atlas-installer
-Icon=net.eterneon.atlas.installer
-Categories=System;
-Keywords=install;installer;setup;
-NoDisplay=false

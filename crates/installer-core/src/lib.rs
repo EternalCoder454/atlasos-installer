@@ -1,6 +1,6 @@
-//! The pure logic behind Atlas Installer: which disks to offer, how to
+//! The pure logic behind Telamon Installer: which disks to offer, how to
 //! partition them, the safety check, the files written into the installed
-//! system, and progress. No I/O happens here; `atlas-installer-helper` runs
+//! system, and progress. No I/O happens here; `telamon-installer-helper` runs
 //! the commands and hands their output in, and the unit tests use fixtures.
 
 pub mod apps;
@@ -19,7 +19,7 @@ pub mod table;
 pub const MIB: u64 = 1024 * 1024;
 pub const GIB: u64 = 1024 * MIB;
 
-/// Smallest disk (erase) or free region (alongside) AtlasOS installs to.
+/// Smallest disk (erase) or free region (alongside) Telamon OS installs to.
 pub const MIN_INSTALL_BYTES: u64 = 40 * GIB;
 /// Partition sizes, Fedora's defaults.
 pub const ESP_BYTES: u64 = 600 * MIB;

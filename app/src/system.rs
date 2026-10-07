@@ -61,7 +61,7 @@ pub fn live_session() -> bool {
     is_live(
         cmdline.as_deref(),
         &users,
-        Path::new("/run/atlas-installer-session").exists(),
+        Path::new("/run/telamon-installer-session").exists(),
         Path::new("/run/initramfs/live").exists(),
     )
 }
@@ -79,7 +79,7 @@ pub fn is_live(
         return true;
     };
     cmdline.split_whitespace().any(|w| w == "rd.live.image")
-        || users.iter().any(|u| u == "atlas-installer")
+        || users.iter().any(|u| u == "telamon-installer")
         || session_dir
         || live_mount
 }
@@ -118,7 +118,7 @@ pub async fn apply_keymap(keymap: &str) -> Result<(), String> {
     }
     let dir = config_dir().ok_or("no config directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let tmp = dir.join(".kxkbrc.atlas-installer");
+    let tmp = dir.join(".kxkbrc.telamon-installer");
     std::fs::write(&tmp, kxkbrc(&k)).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, dir.join("kxkbrc")).map_err(|e| e.to_string())?;
     let conn = zbus::Connection::session()
@@ -152,7 +152,7 @@ mod tests {
         assert!(is_live(Some("quiet rd.live.image"), &me, false, false));
         assert!(is_live(
             Some("quiet"),
-            &["atlas-installer".into()],
+            &["telamon-installer".into()],
             false,
             false
         ));

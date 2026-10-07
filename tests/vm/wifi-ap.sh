@@ -8,9 +8,9 @@
 #
 # In the live session it also disconnects the wired network, or the UI skips
 # its Wi-Fi page. Restart the UI afterwards so it looks again:
-# vm.py exec <vm> "pkill -f '^/usr/bin/atlas-installer'".
+# vm.py exec <vm> "pkill -f '^/usr/bin/telamon-installer'".
 #
-# Fedora ships mac80211_hwsim in kernel-modules-internal, which AtlasOS
+# Fedora ships mac80211_hwsim in kernel-modules-internal, which Telamon OS
 # doesn't install, so it comes from that package for the guest's kernel,
 # downloaded in a fedora:44 container and kept in build/hwsim/.
 set -euo pipefail

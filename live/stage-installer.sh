@@ -17,13 +17,13 @@ build=build/app-live
 cmake -S app -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
 echo "$versions" >"$build/built-with"
 cmake --build "$build"
-cargo build --release --locked -p atlas-installer-helper
+cargo build --release --locked -p telamon-installer-helper
 
 out=build/live-installer
 rm -rf "$out"
 DESTDIR="$PWD/$out/root" cmake --install "$build" >/dev/null
 root=$out/root/usr
-install -Dm755 "$CARGO_TARGET_DIR/release/atlas-installer-helper" "$root/libexec/atlas-installer-helper"
+install -Dm755 "$CARGO_TARGET_DIR/release/telamon-installer-helper" "$root/libexec/telamon-installer-helper"
 install -Dm644 -t "$root/share/dbus-1/system.d" helper/data/dbus-1/system.d/*
 install -Dm644 -t "$root/share/dbus-1/system-services" helper/data/dbus-1/system-services/*
 install -Dm644 -t "$root/share/polkit-1/actions" helper/data/polkit-1/actions/*

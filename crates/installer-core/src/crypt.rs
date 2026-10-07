@@ -214,15 +214,15 @@ pub fn check_slots(json: &str, enc: Encryption) -> Result<(), String> {
 /// a boot menu starting the ISO as a file, puts its own boot loader's key
 /// in it. At the first start PCR 7 is the system's own, and the service
 /// seals the key to it, then stops running.
-pub const SEAL_UNIT: &str = "atlas-tpm-seal.service";
+pub const SEAL_UNIT: &str = "telamon-tpm-seal.service";
 /// While this file exists, the service runs at every start; it is removed
 /// once the seal worked. Writing it again (and the PIN, with a PIN) seals
 /// the disk anew to the current PCR 7.
-pub const SEAL_MARKER: &str = "/etc/atlas-installer/tpm-seal";
-pub const SEAL_MARKER_TEXT: &str = "# While this file exists, atlas-tpm-seal.service ties the disk's TPM unlock\n# to this PC's Secure Boot state (PCR 7) at each start. It removes this file\n# once that worked.\n";
+pub const SEAL_MARKER: &str = "/etc/telamon-installer/tpm-seal";
+pub const SEAL_MARKER_TEXT: &str = "# While this file exists, telamon-tpm-seal.service ties the disk's TPM unlock\n# to this PC's Secure Boot state (PCR 7) at each start. It removes this file\n# once that worked.\n";
 /// The PIN (no newline), for unlocking with the current TPM key and for the
 /// new one: 0600, on the encrypted root. Removed with the marker.
-pub const SEAL_PIN: &str = "/etc/atlas-installer/tpm-pin";
+pub const SEAL_PIN: &str = "/etc/telamon-installer/tpm-pin";
 
 /// The unit file of [`SEAL_UNIT`] for the LUKS volume `uuid`.
 ///
@@ -239,7 +239,7 @@ pub fn seal_unit(enc: Encryption, uuid: &str) -> Result<String, String> {
         _ => return Err("only a TPM unlock is sealed at the first start".into()),
     };
     let mut s = format!(
-        "# Written by the AtlasOS installer: ties the disk's TPM unlock to this\n\
+        "# Written by the Telamon OS installer: ties the disk's TPM unlock to this\n\
          # PC's Secure Boot state (PCR 7) at the first start. See {SEAL_MARKER}.\n\
          [Unit]\n\
          Description=Tie the disk's TPM unlock to Secure Boot\n\
@@ -266,7 +266,7 @@ pub fn seal_unit(enc: Encryption, uuid: &str) -> Result<String, String> {
         "TimeoutStartSec=2min\n\
          UMask=0077\n\
          ProtectSystem=strict\n\
-         ReadWritePaths=/etc/atlas-installer -/run/cryptsetup\n\
+         ReadWritePaths=/etc/telamon-installer -/run/cryptsetup\n\
          PrivateTmp=yes\n\
          PrivateNetwork=yes\n\
          ProtectHome=yes\n\
@@ -307,9 +307,9 @@ mod tests {
             "ExecStart=/usr/bin/systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2 /dev/disk/by-uuid/{UUID}\n"
         );
         assert!(tpm.contains(&exec), "{tpm}");
-        assert!(tpm.contains("ConditionPathExists=/etc/atlas-installer/tpm-seal\n"));
+        assert!(tpm.contains("ConditionPathExists=/etc/telamon-installer/tpm-seal\n"));
         assert!(
-            tpm.contains("ExecStartPost=/usr/bin/rm -f /etc/atlas-installer/tpm-pin /etc/atlas-installer/tpm-seal\n")
+            tpm.contains("ExecStartPost=/usr/bin/rm -f /etc/telamon-installer/tpm-pin /etc/telamon-installer/tpm-seal\n")
         );
         assert!(tpm.contains("DefaultDependencies=no\n"));
         assert!(tpm.contains("WantedBy=multi-user.target\n"));
@@ -318,9 +318,13 @@ mod tests {
 
         let pin = seal_unit(Encryption::TpmPin, UUID).unwrap();
         assert!(pin.contains("--tpm2-pcrs=7 --tpm2-with-pin=yes --wipe-slot=tpm2 "));
-        assert!(pin.contains("LoadCredential=cryptenroll.tpm2-pin:/etc/atlas-installer/tpm-pin\n"));
         assert!(
-            pin.contains("LoadCredential=cryptenroll.new-tpm2-pin:/etc/atlas-installer/tpm-pin\n")
+            pin.contains("LoadCredential=cryptenroll.tpm2-pin:/etc/telamon-installer/tpm-pin\n")
+        );
+        assert!(
+            pin.contains(
+                "LoadCredential=cryptenroll.new-tpm2-pin:/etc/telamon-installer/tpm-pin\n"
+            )
         );
 
         assert!(seal_unit(Encryption::Password, UUID).is_err());
