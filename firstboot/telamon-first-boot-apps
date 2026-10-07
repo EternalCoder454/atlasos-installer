@@ -19,7 +19,9 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Pinned mise release (linux-x64 binary) and its SHA-256 from the release's
@@ -38,10 +40,10 @@ CATALOG = Path("/usr/share/telamon/first-boot-apps.json")
 # writes goes under the new one, and the old record is removed with the new.
 LEGACY_RECORD = Path("/var/lib/atlasos/first-boot-apps.json")
 LEGACY_STATUS = Path("/var/lib/atlasos/first-boot-apps.status")
-LEGACY_STATE_DIR = Path.home() / ".local/state/telamon"
+LEGACY_STATE_DIR = Path.home() / ".local/state/atlasos"
 OS_RELEASE = Path("/etc/os-release")
 PCI_DEVICES = Path("/sys/bus/pci/devices")
-STATE_DIR = Path.home() / ".local/state/atlasos"
+STATE_DIR = Path.home() / ".local/state/telamon"
 BIN_DIR = Path.home() / ".local/bin"
 RUNTIME_DIR = Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get("XDG_RUNTIME_DIR") else None
 REQUIRE_ROOT = True    # system mode checks; the tests turn these off by patching
@@ -311,6 +313,47 @@ def refuse_record(reason):
     return EX_PERMANENT
 
 
+def install_batch(flat):
+    """Install every flatpak of `flat` in one transaction: one dependency solve
+    and one download queue instead of one per app. True when it all went in;
+    False for a single app (nothing to batch) or when the batch failed, and
+    install_each then goes through them one at a time."""
+    if len(flat) < 2:
+        return False
+    refs = []
+    for _, apps in flat:
+        refs += [a for a in apps if a not in refs]
+    try:
+        check(["flatpak", "install", "--system", "-y", "--noninteractive", "--or-update", "flathub"] + refs,
+              7200, "Installing apps from Flathub")
+    except Failed:
+        return False
+    return True
+
+
+def install_each(flat, remaining, *extra):
+    """Install the flatpak entries one app at a time, saving the record after each.
+    Returns (failed ids, reason, permanent, ids still to do)."""
+    names = [i for i, _ in flat]
+    failed, reason, permanent = [], "", False
+    remaining = list(remaining)
+    for n, (i, apps) in enumerate(flat):
+        try:
+            for app in apps:
+                check(["flatpak", "install", "--system", "-y", "--noninteractive", *extra, "flathub", app],
+                      7200, "Installing %s from Flathub" % i)
+        except Failed as e:
+            reason, permanent = e.reason, permanent or not e.retry
+            if not e.retry:  # nothing else can work either
+                failed += names[n:]
+                break
+            failed.append(i)
+        else:
+            remaining.remove(i)
+            save_record(remaining)
+    return failed, reason, permanent, remaining
+
+
 def system_mode():
     if REQUIRE_ROOT and os.geteuid() != 0:
         log("system mode needs root")
@@ -342,20 +385,14 @@ def system_mode():
         except Failed as e:
             failed, reason, permanent = list(names), e.reason, not e.retry
         else:
-            for n, (i, apps) in enumerate(flat):
-                try:
-                    for app in apps:
-                        check(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub", app],
-                              7200, "Installing %s from Flathub" % i)
-                except Failed as e:
-                    reason, permanent = e.reason, permanent or not e.retry
-                    if not e.retry:  # nothing else can work either
-                        failed += names[n:]
-                        break
-                    failed.append(i)
-                else:
-                    remaining.remove(i)
-                    save_record(remaining)
+            if install_batch(flat):
+                remaining = [i for i in remaining if i not in names]
+                save_record(remaining)
+            else:
+                # One app, or the batch failed: one at a time, which finds
+                # the app that failed and keeps what the batch finished.
+                again = ("--or-update",) if len(flat) > 1 else ()
+                failed, reason, permanent, remaining = install_each(flat, remaining, *again)
     if not remaining:
         if record_path() is not None:
             save_record([])
@@ -415,7 +452,7 @@ def read_lines(path):
 
 
 def legacy_state(path):
-    """The file of `path`'s name in the state folder of Atlas's first start."""
+    """The file of `path`'s name in the state folder of Atlas's first start (before the rename)."""
     return LEGACY_STATE_DIR / Path(path).name
 
 
@@ -425,8 +462,12 @@ def read_state(path):
     return read_lines(path) | read_lines(legacy_state(path))
 
 
+STATE_LOCK = threading.Lock()  # mise and toolbox finish on their own threads
+
+
 def add_line(path, line):
-    write_atomic(path, "\n".join(sorted(read_state(path) | {line})) + "\n", 0o600)
+    with STATE_LOCK:
+        write_atomic(path, "\n".join(sorted(read_state(path) | {line})) + "\n", 0o600)
 
 
 def failed_mark(i):
@@ -549,8 +590,17 @@ def do_user_work(todo):
     tools = [a for _, k, a in todo if k == "mise-tool"]
     pk_ids = [i for i, k, _ in todo if k == "toolbox"]
     pkgs = [p for _, k, a in todo if k == "toolbox" for p in a.split()]
-    group(mise_ids, lambda: do_mise(tools))
-    group(pk_ids, lambda: do_toolbox(pkgs))
+    jobs = [(items, fn) for items, fn in ((mise_ids, lambda: do_mise(tools)),
+                                           (pk_ids, lambda: do_toolbox(pkgs))) if items]
+    if len(jobs) > 1:
+        # Developer tools come from the network and the toolbox from a
+        # container image: neither waits for the other.
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            for f in [pool.submit(group, items, fn) for items, fn in jobs]:
+                f.result()
+    else:
+        for items, fn in jobs:
+            group(items, fn)
     if transient or permanent:
         if once_per_boot("failed"):
             notify("Some apps could not be added",

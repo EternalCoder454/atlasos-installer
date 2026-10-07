@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- UI polish: Telamon.Ui's scroll bar everywhere (the lists and the pages), lists
+  and choice cards in the same card colours as the sections, Title Case
+  headings ("Web Browser", "Developer Tools", "How to Install on <disk>",
+  "Pick Your Apps"), the disk choices named after the disk they are for, and
+  the Disk page scrolls to them when a disk is chosen in a short window. The
+  Local AI warning now appears under the switches once one is turned on, and
+  the page's two lines of introduction are one. The recovery key and the MOK
+  password are in the mono font. The Wi-Fi list is only as tall as its rows.
+  Pages without a field take the keyboard, so Tab starts at their first
+  control. The install bar shows it is working until the helper's first step.
+  The brand mark is the image's own `telamon` icon when the icon theme has it,
+  else the copy bundled in the app (it was drawn blank when neither loaded).
+- Faster and lighter: the brand panel loads each step's drawing when first
+  needed instead of all eight at start-up.
+- First-start apps: the Flathub apps install in one `flatpak install`
+  transaction (one at a time only if that fails, to find the failing app), and
+  the `mise` tools and the toolbox install at the same time. The done markers
+  go in `~/.local/state/telamon` again (a rename slip had swapped them with the
+  old `atlasos` folder, which is still read).
+- Tools: `app/tools/screenshot.sh` can click, type and scroll before the
+  shot (`ACTIONS`), draws the OS mark (`OS_LOGO`), and regrabs a window that
+  has not painted yet; `app/tools/bench.sh` measures start-up, memory and CPU.
+
 ## 0.2.0
 
 - Renamed to Telamon Installer: Atlas Installer is now `telamon-installer`

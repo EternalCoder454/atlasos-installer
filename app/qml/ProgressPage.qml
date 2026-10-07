@@ -50,6 +50,8 @@ InstallerPage {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.largeSpacing
             value: page.backend.progress
+            // Until the helper reports its first step, the bar says it is working.
+            indeterminate: page.backend.progress <= 0
         }
         RowLayout {
             Layout.fillWidth: true

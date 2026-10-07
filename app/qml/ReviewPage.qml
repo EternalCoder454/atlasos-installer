@@ -50,6 +50,7 @@ InstallerPage {
         anchors.fill: parent
         contentWidth: availableWidth
         QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+        QQC2.ScrollBar.vertical: TelamonScrollBar {}
 
         ColumnLayout {
             width: page.contentWidth

@@ -10,6 +10,7 @@ import json
 import os
 import stat
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -159,7 +160,25 @@ class SystemMode(Base):
         self.write_record(["firefox", "brave"])
         self.assertEqual(self.run_mode("system"), 0)
         self.assertFalse(self.record.exists())
-        self.assertEqual(len(self.calls("flatpak install")), 2)  # one install per app
+        # one transaction for both apps
+        self.assertEqual(self.calls("flatpak install"), [
+            "flatpak install --system -y --noninteractive --or-update flathub org.mozilla.firefox com.brave.Browser"])
+
+    def test_a_failed_batch_is_retried_one_app_at_a_time(self):
+        self.write_record(["firefox", "brave", "gh"])
+        self.assertEqual(self.run_mode("system", FAIL_MATCH="com.brave.Browser"), 1)
+        installs = self.calls("flatpak install")
+        self.assertEqual(len(installs), 3)  # the batch, then firefox and brave on their own
+        self.assertIn("flathub org.mozilla.firefox com.brave.Browser", installs[0])
+        self.assertTrue(installs[1].endswith("--or-update flathub org.mozilla.firefox"))
+        self.assertTrue(installs[2].endswith("--or-update flathub com.brave.Browser"))
+        self.assertEqual(self.rec_apps(), ["brave", "gh"])  # firefox is done, brave stays
+
+    def test_one_app_is_not_a_batch(self):
+        self.write_record(["firefox"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.calls("flatpak install"),
+                         ["flatpak install --system -y --noninteractive flathub org.mozilla.firefox"])
 
     def test_one_failed_app_keeps_only_that_id(self):
         self.write_record(["firefox", "brave", "gh"])
@@ -236,6 +255,22 @@ class UserMode(Base):
         self.assertEqual(set((self.state / "first-boot-apps.done").read_text().split()),
                          {"gh", "debug"})
         self.assertEqual(len([c for c in self.calls("gdbus") if "Adding your apps" in c]), 1)
+
+    def test_developer_tools_and_the_toolbox_install_at_the_same_time(self):
+        self.write_record(["gh", "debug"])
+        both = threading.Barrier(2, timeout=10)  # each waits for the other: one after the other would break it
+
+        def work(*_):
+            both.wait()
+        with mock.patch.object(fba, "do_mise", work), mock.patch.object(fba, "do_toolbox", work):
+            self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(set((self.state / "first-boot-apps.done").read_text().split()), {"gh", "debug"})
+
+    def test_a_failed_toolbox_does_not_stop_the_tools(self):
+        self.write_record(["gh", "debug"])
+        self.assertEqual(self.run_mode("user", FAIL_TOOLBOX=1), 1)
+        self.assertTrue(self.calls("mise use -g gh"))
+        self.assertEqual((self.state / "first-boot-apps.done").read_text().split(), ["gh"])
 
     def test_ollama_comes_through_mise_with_no_models(self):
         self.write_record(["ollama"])

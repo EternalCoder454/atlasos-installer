@@ -36,9 +36,10 @@ FocusScope {
     Rectangle {
         anchors.fill: parent
         radius: TelamonStyle.radiusLarge
-        color: card.selected ? TelamonStyle.selection : Kirigami.Theme.backgroundColor.hslLightness > 0.5 ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.5) : Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(1, 1, 1, hover.hovered && card.possible ? 0.09 : 0.06))
+        // The Section card's colours, so a card reads as part of the same page.
+        color: card.selected ? TelamonStyle.selection : hover.hovered && card.possible ? TelamonStyle.surfaceRaised : TelamonStyle.surface
         border.width: card.selected ? 2 : 1
-        border.color: card.selected ? TelamonStyle.accent : Qt.alpha(Kirigami.Theme.textColor, hover.hovered && card.possible ? 0.25 : 0.12)
+        border.color: card.selected ? TelamonStyle.accent : hover.hovered && card.possible ? TelamonStyle.controlBorder : TelamonStyle.separator
         Behavior on color {
             ColorAnimation {
                 duration: TelamonStyle.durationShort

@@ -30,6 +30,15 @@ FocusScope {
     signal back
     signal secondary
 
+    // A page without a field to type in (Apps, Disk, Review...) still takes
+    // the keyboard, so Tab starts at its first control and not nowhere. The
+    // pages with a search field focus it themselves, before this runs.
+    Component.onCompleted: Qt.callLater(() => {
+        if (!page.activeFocus) {
+            page.forceActiveFocus();
+        }
+    })
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0

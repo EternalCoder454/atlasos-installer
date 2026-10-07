@@ -31,10 +31,38 @@ InstallerPage {
         if (page.app.disk === null || page.app.disk.id !== d.id) {
             page.app.mode = "";
         }
+        const first = page.app.disk === null || page.app.disk.id !== d.id;
         page.app.disk = d;
+        if (first) {
+            // The choices for this disk appear below the list: show them.
+            revealTimer.restart();
+        }
         if (!(page.app.mode === "erase" && d.eraseOk || page.app.mode === "free-space" && d.freeOk)) {
             page.app.mode = d.freeOk ? "free-space" : d.eraseOk && d.empty ? "erase" : "";
         }
+    }
+
+    // Scrolls the "How to Install" choices into view, when the page is too
+    // short to hold them next to the list. Waits a moment for the layout.
+    Timer {
+        id: revealTimer
+        interval: 60
+        onTriggered: {
+            const f = scroll.contentItem as Flickable;
+            const top = how.mapToItem(f.contentItem, 0, 0).y - Kirigami.Units.largeSpacing;
+            const to = Math.min(top, Math.max(0, f.contentHeight - f.height));
+            if (to > f.contentY) {
+                reveal.to = to;
+                reveal.restart();
+            }
+        }
+    }
+    NumberAnimation {
+        id: reveal
+        target: scroll.contentItem
+        property: "contentY"
+        duration: TelamonStyle.durationLong
+        easing.type: Easing.OutCubic
     }
 
     // The chosen disk went away or changed: don't swap in another unasked.
@@ -80,6 +108,7 @@ InstallerPage {
         anchors.fill: parent
         contentWidth: availableWidth
         QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+        QQC2.ScrollBar.vertical: TelamonScrollBar {}
 
         ColumnLayout {
             width: page.contentWidth
@@ -158,15 +187,21 @@ InstallerPage {
             }
 
             ColumnLayout {
+                id: how
                 visible: page.diskState === "ready" && page.disk !== null
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
 
+                // Names the disk the choices below are about: after a scroll,
+                // or with several disks, what gets erased must stay clear.
                 QQC2.Label {
+                    Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.largeSpacing
-                    text: qsTr("How to install")
+                    text: page.disk ? qsTr("How to Install on %1").arg(page.disk.title) : ""
                     font.bold: true
                     opacity: 0.65
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
                     Accessible.role: Accessible.Heading
                 }
                 ChoiceCard {

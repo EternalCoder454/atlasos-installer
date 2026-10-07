@@ -36,6 +36,7 @@ InstallerPage {
         anchors.fill: parent
         contentWidth: availableWidth
         QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+        QQC2.ScrollBar.vertical: TelamonScrollBar {}
 
         ColumnLayout {
             width: page.contentWidth
@@ -45,6 +46,7 @@ InstallerPage {
 
             QQC2.Label {
                 Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
                 wrapMode: Text.Wrap
                 text: (page.result.windowsEntry === true
                        ? qsTr("Windows is still there: choose it in the menu when the computer starts.") + " "
@@ -56,7 +58,7 @@ InstallerPage {
 
             Section {
                 visible: page.recoveryKey.length > 0
-                title: qsTr("Recovery key")
+                title: qsTr("Recovery Key")
                 footer: qsTr("Telamon OS can't show it again after the restart.")
 
                 ColumnLayout {
@@ -90,8 +92,8 @@ InstallerPage {
                                     color: Kirigami.Theme.textColor
                                     selectionColor: TelamonStyle.accent
                                     selectedTextColor: TelamonStyle.accentText
-                                    font.family: "monospace"
-                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
+                                    font.family: TelamonStyle.monoFamily
+                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.25
                                     font.weight: Font.DemiBold
                                     Accessible.role: Accessible.StaticText
                                     Accessible.name: qsTr("Recovery key, part")
@@ -125,7 +127,7 @@ InstallerPage {
 
             Section {
                 visible: page.mok.length > 0
-                title: qsTr("One more step for NVIDIA graphics")
+                title: qsTr("One More Step for NVIDIA Graphics")
                 footer: qsTr("This happens once. If you miss the blue screen, Telamon OS starts with basic graphics; open a terminal and run “sudo /usr/libexec/atlasos/nvidia-enroll-key” to try again.")
 
                 ColumnLayout {
@@ -174,7 +176,7 @@ InstallerPage {
                             id: pw
                             anchors.centerIn: parent
                             text: page.mok.replace(/(\d{4})(\d{4})/, "$1 $2")
-                            font.family: "monospace"
+                            font.family: TelamonStyle.monoFamily
                             font.pointSize: Kirigami.Theme.defaultFont.pointSize * 2
                             font.weight: Font.DemiBold
                             font.letterSpacing: 2
@@ -186,7 +188,7 @@ InstallerPage {
 
             Section {
                 visible: (page.result.warnings || []).length > 0
-                title: qsTr("Worth knowing")
+                title: qsTr("Worth Knowing")
                 footer: qsTr("Telamon OS works despite these. The install log is at %1 until the computer restarts.").arg(page.result.log || "/run/telamon-installer/install.log")
                 Repeater {
                     model: page.result.warnings || []

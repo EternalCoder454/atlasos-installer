@@ -106,7 +106,10 @@ access to the VM disks. Use `--security-opt label=disable` instead.
   focuses the window, because an inactive window draws washed-out colours.
   Set `SCALE=1.5` to match the user's desktop, and `ATLAS=1` for the
   AtlasOS colours and IBM Plex Sans (copies of the schemes are in
-  `app/tools/schemes/`).
+  `app/tools/schemes/`). `ACTIONS='click 700 177; scroll 15'` (and `key`,
+  `type`, `size`, `pause`) gets to a state a flag can't; `OS_LOGO=file.svg`
+  gives the icon theme a `telamon` icon. `app/tools/bench.sh` measures
+  start-up, memory and CPU (`OUT=file`, `BIN=binary`).
 - **The live session** (`live/`): `iso/make-iso.sh` builds the UI and
   helper in the dev container (`live/stage-installer.sh`, staged in
   `build/live-installer/`), and `live/build.sh` installs them into the live

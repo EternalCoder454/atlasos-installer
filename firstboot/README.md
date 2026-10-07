@@ -9,14 +9,20 @@ the record is executed or used as a URL.
 ## What runs when
 
 - `telamon-first-boot-apps.service` (system, root, after network-online): installs
-  `flatpak:` entries system-wide from Flathub, writes progress to
+  `flatpak:` entries system-wide from Flathub, all in one `flatpak install`
+  transaction (one dependency solve and one download queue; a single app is
+  installed on its own). When that fails, it goes through the apps one at a
+  time with `--or-update`, to find which one failed and to keep the ones that
+  went in. It writes progress to
   `/var/lib/telamon/first-boot-apps.status`, then rewrites the record with only
   the per-account entries (or deletes it). Fails non-zero on error, so systemd
   retries with backoff.
 - `telamon-first-boot-apps.service` (user, at graphical login): installs `mise`
   (pinned release, SHA-256 checked, to `~/.local/bin/mise`), `mise:<tool>` via
   `mise use -g`, and `toolbox:<packages>` into the default toolbox. Done ids go
-  in `~/.local/state/telamon/first-boot-apps.done`. Shows notifications for
+  in `~/.local/state/telamon/first-boot-apps.done`. `mise` tools and the
+  toolbox install at the same time (they use different parts of the machine
+  and the network), each retrying on its own. Shows notifications for
   both parts. Retries in-process with backoff (30 s up to 30 min) while offline.
 - `/etc/profile.d/telamon-mise.sh` activates mise in bash when it is installed.
 
