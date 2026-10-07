@@ -16,6 +16,7 @@ InstallerPage {
     readonly property var catalog: JSON.parse(page.app.backend.appsJson)
     readonly property var browsers: page.catalog.filter(a => a.group === "browser")
     readonly property var tools: page.catalog.filter(a => a.group === "developer")
+    readonly property var aiTools: page.catalog.filter(a => a.group === "ai")
     readonly property var chosenBrowser: page.browsers.find(a => page.app.apps.includes(a.id)) || null
 
     title: qsTr("Pick your apps")
@@ -89,6 +90,41 @@ InstallerPage {
                         showSwitch: true
                         switchChecked: page.app.apps.includes(modelData.id)
                         onSwitchToggled: checked => page.setTool(modelData.id, checked)
+                    }
+                }
+            }
+
+            // The warning sits between the heading and the rows, so the
+            // heading is drawn here and not by the Section.
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: page.aiTools.length > 0
+                spacing: Kirigami.Units.smallSpacing
+
+                QQC2.Label {
+                    Layout.leftMargin: Kirigami.Units.largeSpacing
+                    text: qsTr("Local AI")
+                    font.bold: true
+                    opacity: 0.65
+                    Accessible.role: Accessible.Heading
+                }
+                InfoBanner {
+                    Layout.fillWidth: true
+                    type: "warning"
+                    text: qsTr("Local AI usually needs a dedicated graphics card (GPU) with enough video memory. On integrated graphics, or with only the processor, it runs slowly.")
+                }
+                Section {
+                    footer: qsTr("Neither one downloads any AI models, which are several gigabytes each. You choose and download them later, once Telamon OS is running.")
+                    Repeater {
+                        model: page.aiTools
+                        SectionRow {
+                            required property var modelData
+                            title: modelData.name
+                            subtitle: modelData.summary
+                            showSwitch: true
+                            switchChecked: page.app.apps.includes(modelData.id)
+                            onSwitchToggled: checked => page.setTool(modelData.id, checked)
+                        }
                     }
                 }
             }

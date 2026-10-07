@@ -16,6 +16,8 @@ pub enum Group {
     Browser,
     /// Pick any.
     Developer,
+    /// Local AI (a model runner and a chat app). Pick any.
+    Ai,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -109,6 +111,26 @@ mod tests {
                 assert!(c[..i].iter().any(|b| b.install == "mise"), "{a:?}");
             }
         }
+    }
+
+    #[test]
+    fn local_ai_is_two_ordinary_choices() {
+        let ai: Vec<_> = catalog().iter().filter(|a| a.group == Group::Ai).collect();
+        assert_eq!(
+            ai.iter()
+                .map(|a| (a.id.as_str(), a.install.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("ollama", "mise:ollama"),
+                ("alpaca", "flatpak:com.jeffser.Alpaca")
+            ]
+        );
+        // Both can be picked, with or without the other tools.
+        let got = validate(&ids(&["alpaca", "firefox", "ollama", "mise"])).unwrap();
+        assert_eq!(
+            got.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            ["firefox", "mise", "ollama", "alpaca"]
+        );
     }
 
     #[test]

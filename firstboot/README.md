@@ -34,6 +34,18 @@ Add one line to `apps.json` with an `install` of `flatpak:<app id>`, `mise`,
 pinned and hashed. To bump mise, change `MISE_VERSION` and
 `MISE_SHA256` in the script together.
 
+## Local AI
+
+Two ordinary entries in the `ai` group, shown together on the apps page under
+a graphics-card warning: `ollama` (`mise:ollama`, the upstream release through
+mise's registry, whose main archive carries the CPU, NVIDIA CUDA and Vulkan
+backends) and `alpaca`
+(`flatpak:com.jeffser.Alpaca`, a chat app that is an Ollama client). Nothing
+pulls a model: they are several GB each, so the user runs `ollama pull` (or
+pulls from Alpaca) later. Nothing starts the Ollama server, so `ollama serve`
+runs when it is wanted. The archive mise fetches has no AMD ROCm backend (upstream
+ships it as a separate download); AMD cards use the Vulkan one.
+
 ## Tests
 
 `env -u DISPLAY -u WAYLAND_DISPLAY python3 -m unittest discover -s firstboot/tests -v`

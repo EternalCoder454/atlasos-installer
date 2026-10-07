@@ -100,6 +100,13 @@ class SystemMode(Base):
         self.assertTrue(self.calls("flatpak install --system -y --noninteractive flathub org.mozilla.firefox"))
         self.assertEqual(self.st()["state"], "done")
 
+    def test_local_ai_chat_app_is_a_system_flatpak_and_ollama_waits_for_the_account(self):
+        self.write_record(["ollama", "alpaca"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertTrue(self.calls("flatpak install --system -y --noninteractive flathub com.jeffser.Alpaca"))
+        self.assertEqual(self.rec_apps(), ["ollama"])
+        self.assertEqual(self.calls("mise"), [])  # no model or tool is fetched by the system part
+
     def test_success_deletes_record_when_nothing_left(self):
         self.write_record(["firefox", "brave"])
         self.assertEqual(self.run_mode("system"), 0)
@@ -181,6 +188,13 @@ class UserMode(Base):
         self.assertEqual(set((self.state / "first-boot-apps.done").read_text().split()),
                          {"gh", "debug"})
         self.assertEqual(len([c for c in self.calls("gdbus") if "Adding your apps" in c]), 1)
+
+    def test_ollama_comes_through_mise_with_no_models(self):
+        self.write_record(["ollama"])
+        self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(self.calls("mise"), ["mise use -g ollama"])  # not "ollama pull" or "run"
+        self.assertEqual(self.calls("toolbox"), [])
+        self.assertEqual((self.state / "first-boot-apps.done").read_text().split(), ["ollama"])
 
     def test_done_file_prevents_repeats(self):
         self.write_record(["gh", "debug"])
