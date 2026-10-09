@@ -6,7 +6,7 @@ members = ["crates/installer-core", "helper"]
 exclude = ["app"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/EternalCoder454/atlasos-installer"
@@ -16,3 +16,6 @@ rust-version = "1.89"
 lto = "thin"
 codegen-units = 4
 strip = true
+# Root code: an arithmetic overflow is a panic, never a silent wrap (docs/SECURITY.md,
+# "Build hardening").
+overflow-checks = true

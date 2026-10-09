@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 rust-version.workspace = true
 
 [[bin]]
@@ -23,3 +24,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 
 [dev-dependencies]
 tempfile = "3"
+proptest = { version = "1", default-features = false, features = ["std"] }

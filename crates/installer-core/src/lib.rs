@@ -14,7 +14,11 @@ pub mod lsblk;
 pub mod plan;
 pub mod progress;
 pub mod settings;
+pub mod sigpolicy;
 pub mod table;
+
+#[cfg(test)]
+mod props;
 
 pub const MIB: u64 = 1024 * 1024;
 pub const GIB: u64 = 1024 * MIB;

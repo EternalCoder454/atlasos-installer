@@ -17,7 +17,7 @@ use installer_core::plan::{EspInfo, Mode, Plan, Role};
 use installer_core::progress::{BootcProgress, Progress, Stage};
 use installer_core::settings::{self, Keymap};
 use installer_core::table::{Table, partition_number};
-use installer_core::{apps, efi, gpt, grub};
+use installer_core::{apps, efi, gpt, grub, sigpolicy};
 use serde::Serialize;
 
 use crate::run::{self, Cmd, Output, Runner, bin, lock, run};
@@ -33,6 +33,19 @@ const NM_DIRS: [&str; 2] = [
 ];
 /// The installed system tracks this tag, which Atlas Updater reads as its channel.
 const IMAGE_TAG: &str = "stable";
+/// Where the image comes from. The reference is built from these constants
+/// and nothing a caller sends: see [`image_ref`].
+const IMAGE_REPO: &str = "ghcr.io/eternalcoder454";
+const IMAGE_NAME: &str = "atlasos";
+const IMAGE_NAME_NVIDIA: &str = "atlasos-nvidia";
+/// The container policy and signature lookup of the live system (the same
+/// files the installed image carries): see [`image_policy`].
+const POLICY_FILES: [&str; 2] = [
+    "etc/containers/policy.json",
+    "usr/share/containers/policy.json",
+];
+const REGISTRIES_D: &str = "etc/containers/registries.d";
+const POLICY_MAX: u64 = 1 << 20;
 
 const MINUTE: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -49,6 +62,13 @@ const SAVED_LOGS: &str = "var/log/telamon-installer";
 const KEY_DIR: &str = "luks";
 const KEY_FILE: &str = "luks-key";
 const KEY_BYTES: usize = 64;
+/// The LUKS2 parameters, named so that no cryptsetup build's default (which
+/// can be changed when it is built) decides them: AES-256 in XTS mode (a
+/// 512 bit key is two 256 bit keys), SHA-256, and Argon2id for a password.
+const LUKS_CIPHER: &str = "aes-xts-plain64";
+const LUKS_KEY_BITS: &str = "512";
+const LUKS_HASH: &str = "sha256";
+const LUKS_PBKDF: &str = "argon2id";
 const TPM_FAILED: &str = "This PC's security chip (TPM) didn't accept the disk key. Go back and turn encryption off, or try again.";
 
 /// Where things are. Host files are read under `root`, so tests can use a
@@ -78,6 +98,20 @@ impl Env {
     pub fn log_path(&self) -> PathBuf {
         self.run_dir.join("install.log")
     }
+}
+
+/// The helper's run directory (the install log, the ESP probe's mount point,
+/// the temporary disk key's folder), made for root alone: 0700, also when it
+/// was there already with another mode. The log inside is 0600 and the key's
+/// folder 0700 anyway; this keeps what is mounted for the probe and the
+/// names of the files from the live session's user.
+fn make_run_dir(env: &Env) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&env.run_dir)?;
+    fs::set_permissions(&env.run_dir, fs::Permissions::from_mode(0o700))
 }
 
 fn path_str(p: &Path) -> Result<&str, String> {
@@ -318,7 +352,7 @@ fn esp_info(r: &dyn Runner, env: &Env, p: &Device) -> Result<Option<EspInfo>, St
         Some(m) if m.starts_with('/') => (env.root.join(m.trim_start_matches('/')), false),
         _ => {
             let dir = env.run_dir.join("esp-probe");
-            if fs::create_dir_all(&dir).is_err() {
+            if make_run_dir(env).is_err() || fs::create_dir_all(&dir).is_err() {
                 return Ok(None);
             }
             let d = path_str(&dir)?;
@@ -380,7 +414,7 @@ fn chain_loaded(env: &Env, probe: &disks::Probe) -> Option<&'static str> {
 }
 
 /// Everything decided before the first write.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Prepared {
     pub plan: Plan,
     /// What is installed and tracked, e.g. `ghcr.io/eternalcoder454/atlasos:stable`.
@@ -404,6 +438,33 @@ pub struct Prepared {
     /// The disk's fingerprint as `prepare` saw it; checked again just before
     /// the first write.
     pub fingerprint: String,
+    /// `Ok`: the live system's container policy proves that the installed
+    /// system's updates are checked against Telamon OS's signature, so bootc
+    /// is asked to record that (`--enforce-container-sigpolicy`). `Err`: why
+    /// it can't be proven; bootc is run without the flag and the outcome
+    /// carries a warning (see [`image_policy`]).
+    pub sigpolicy: Result<(), String>,
+}
+
+/// `wifi` holds a network password (the keyfile), so `Debug` shows the file's
+/// name only.
+impl std::fmt::Debug for Prepared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Prepared")
+            .field("plan", &self.plan)
+            .field("image", &self.image)
+            .field("windows_esps", &self.windows_esps)
+            .field("mok", &self.mok)
+            .field("wifi", &self.wifi.as_ref().map(|(name, _)| name))
+            .field("console_keymap", &self.console_keymap)
+            .field("luks_uuid", &self.luks_uuid)
+            .field("kargs", &self.kargs)
+            .field("boot_media", &self.boot_media)
+            .field("chain_loaded", &self.chain_loaded)
+            .field("fingerprint", &self.fingerprint)
+            .field("sigpolicy", &self.sigpolicy)
+            .finish()
+    }
 }
 
 fn secure_boot_on(env: &Env) -> bool {
@@ -432,6 +493,72 @@ fn find_wifi(env: &Env, uuid: &str) -> Result<(String, String), String> {
         }
     }
     Err("The Wi-Fi connection to carry over was not found.".into())
+}
+
+/// The image that is installed and tracked: a constant repository, one of two
+/// constant names and the constant tag. Nothing from the request is in it.
+fn image_ref(nvidia: bool) -> String {
+    format!(
+        "{IMAGE_REPO}/{}:{IMAGE_TAG}",
+        if nvidia {
+            IMAGE_NAME_NVIDIA
+        } else {
+            IMAGE_NAME
+        }
+    )
+}
+
+/// A regular file of at most `max` bytes under the live root, as text.
+fn read_small(env: &Env, rel: &str, max: u64) -> Option<String> {
+    let path = env.host(rel);
+    let meta = fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > max {
+        return None;
+    }
+    fs::read_to_string(path).ok()
+}
+
+/// Whether the live system's container policy proves that the installed
+/// system will check its updates against Telamon OS's signature (see
+/// [`sigpolicy`]): the policy bootc would read, a sigstore requirement for
+/// `image` with keys that exist, and the registries.d setting that makes
+/// containers/image look for the signatures. `Err` is a few words for the
+/// user.
+fn image_policy(env: &Env, image: &str) -> Result<(), String> {
+    // the first file that exists, as bootc and containers/image find it
+    let text = POLICY_FILES
+        .iter()
+        .find(|rel| fs::metadata(env.host(rel)).is_ok())
+        .and_then(|rel| read_small(env, rel, POLICY_MAX))
+        .ok_or("this system has no readable container policy")?;
+    let key_exists = |key: &str| {
+        fs::metadata(env.host(key.trim_start_matches('/')))
+            .is_ok_and(|m| m.is_file() && m.len() > 0)
+    };
+    sigpolicy::check(&text, image, &key_exists)?;
+    let found = fs::read_dir(env.host(REGISTRIES_D)).is_ok_and(|dir| {
+        dir.flatten()
+            .filter(|e| {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                // containers/image reads only *.yaml
+                n.ends_with(".yaml")
+            })
+            .take(64)
+            .filter_map(|e| {
+                read_small(
+                    env,
+                    &format!("{REGISTRIES_D}/{}", e.file_name().to_string_lossy()),
+                    64 * 1024,
+                )
+            })
+            .any(|t| sigpolicy::attachments_enabled(&t, image))
+    });
+    if found {
+        Ok(())
+    } else {
+        Err("this system is not set to look for Telamon OS's signatures".into())
+    }
 }
 
 /// Probe again and decide everything, without writing to any disk. Refuses
@@ -491,10 +618,8 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
     windows_esps.dedup();
 
     let nvidia = env.host(NVIDIA_KEY).is_file();
-    let image = format!(
-        "ghcr.io/eternalcoder454/{}:{IMAGE_TAG}",
-        if nvidia { "atlasos-nvidia" } else { "atlasos" }
-    );
+    let image = image_ref(nvidia);
+    let sigpolicy = image_policy(env, &image);
     let mok = nvidia && secure_boot_on(env) && {
         let key = env.host(NVIDIA_KEY);
         let out = r.run(
@@ -530,6 +655,7 @@ pub fn prepare(r: &dyn Runner, env: &Env, req: &Request) -> Result<Prepared, Str
         boot_media: disks::boot_media(&probe),
         chain_loaded: chain_loaded(env, &probe),
         fingerprint,
+        sigpolicy,
     })
 }
 
@@ -775,7 +901,12 @@ fn gb(bytes: u64) -> String {
     format!("{:.2} GB", bytes as f64 / 1e9)
 }
 
-fn bootc(image: &str, target: &str, kargs: &[String]) -> Cmd {
+/// `enforce`: also `--enforce-container-sigpolicy`, which makes the new
+/// system's origin `ostree-image-signed:docker://...`: its updates are pulled
+/// under the container policy, which must then ask for a signature. Only when
+/// [`image_policy`] has proven that it does (bootc refuses an install whose
+/// policy has a default of `insecureAcceptAnything`).
+fn bootc(image: &str, target: &str, kargs: &[String], enforce: bool) -> Cmd {
     let mut args = vec![
         "install".to_string(),
         "to-filesystem".into(),
@@ -784,9 +915,11 @@ fn bootc(image: &str, target: &str, kargs: &[String]) -> Cmd {
         "--target-imgref".into(),
         image.into(),
         "--skip-fetch-check".into(),
-        "--karg".into(),
-        "rootflags=compress=zstd:1".into(),
     ];
+    if enforce {
+        args.push("--enforce-container-sigpolicy".into());
+    }
+    args.extend(["--karg".into(), "rootflags=compress=zstd:1".into()]);
     for k in kargs {
         args.push("--karg".into());
         args.push(k.clone());
@@ -969,6 +1102,14 @@ fn format_encrypted_root(
                 "luksFormat",
                 "--type",
                 "luks2",
+                "--cipher",
+                LUKS_CIPHER,
+                "--key-size",
+                LUKS_KEY_BITS,
+                "--hash",
+                LUKS_HASH,
+                "--pbkdf",
+                LUKS_PBKDF,
                 "--batch-mode",
                 "--uuid",
                 uuid,
@@ -1063,7 +1204,16 @@ fn format_encrypted_root(
                 r,
                 crypt_cmd(
                     bin::CRYPTSETUP,
-                    ["luksAddKey", "--key-file", tmp, "--new-keyfile", "-", node],
+                    [
+                        "luksAddKey",
+                        "--pbkdf",
+                        LUKS_PBKDF,
+                        "--key-file",
+                        tmp,
+                        "--new-keyfile",
+                        "-",
+                        node,
+                    ],
                 )
                 .stdin(req.password.as_str())
                 .secret(),
@@ -1127,15 +1277,20 @@ pub fn describe(p: &Prepared, req: &Request, env: &Env) -> String {
     }
     s.push_str(&format!(
         "install: {}\n",
-        bootc(&p.image, &target, &p.kargs).display()
+        bootc(&p.image, &target, &p.kargs, p.sigpolicy.is_ok()).display()
     ));
+    s.push_str(&match &p.sigpolicy {
+        Ok(()) => "update signatures: the new system is told to require Telamon OS's signature\n"
+            .to_string(),
+        Err(why) => format!("update signatures: not enforced at install ({why})\n"),
+    });
     s.push_str(&format!("encryption: {}\n", req.encryption.as_str()));
     if let Some(uuid) = &p.luks_uuid {
         let node = p.plan.part(Role::Root).map_or("?", |x| x.node.as_str());
         let mapper = crypt::mapper_name(uuid);
         let steps = [
             format!(
-                "cryptsetup luksFormat --type luks2 --batch-mode --uuid {uuid} --label atlasos --key-file <temporary key> {node}"
+                "cryptsetup luksFormat --type luks2 --cipher {LUKS_CIPHER} --key-size {LUKS_KEY_BITS} --hash {LUKS_HASH} --pbkdf {LUKS_PBKDF} --batch-mode --uuid {uuid} --label atlasos --key-file <temporary key> {node}"
             ),
             format!("cryptsetup open --allow-discards --key-file <temporary key> {node} {mapper}"),
             mkfs(Role::Root, &format!("/dev/mapper/{mapper}")).display(),
@@ -1148,7 +1303,7 @@ pub fn describe(p: &Prepared, req: &Request, env: &Env) -> String {
                     "systemd-cryptenroll --unlock-key-file=<temporary key> --tpm2-device=auto --tpm2-pcrs= --tpm2-with-pin=yes {node} (PIN in $NEWPIN)"
                 ),
                 _ => format!(
-                    "cryptsetup luksAddKey --key-file <temporary key> --new-keyfile - {node} (password on stdin)"
+                    "cryptsetup luksAddKey --pbkdf {LUKS_PBKDF} --key-file <temporary key> --new-keyfile - {node} (password on stdin)"
                 ),
             },
             format!("cryptsetup luksRemoveKey --key-file <temporary key> {node}, then check the key slots"),
@@ -1285,8 +1440,7 @@ pub fn install(
     req: &Request,
     emit: &mut dyn FnMut(&Progress),
 ) -> Result<Outcome, String> {
-    fs::create_dir_all(&env.run_dir)
-        .map_err(|e| format!("cannot create {}: {e}", env.run_dir.display()))?;
+    make_run_dir(env).map_err(|e| format!("cannot create {}: {e}", env.run_dir.display()))?;
     let log = Log::create(&env.log_path());
     let lr = LogRunner {
         inner: r,
@@ -1663,6 +1817,12 @@ fn place(base: &Path, rel: &str, entry: Entry, private: bool) -> Result<Vec<Path
             Err(e) => return Err(fail(e)),
         };
     }
+    // The directory of a private file is root's alone, also when it was there
+    // already (an image could ship it 0755): the fd is the directory that was
+    // walked to, not a path that could be swapped.
+    if private && !dirs.is_empty() {
+        rustix::fs::fchmod(&fd, Mode::from_raw_mode(0o700)).map_err(fail)?;
+    }
     // A temporary name beside the file, created new (never an existing
     // file or link), then renamed over the final name.
     let tmp = format!(".{name}.telamon-tmp-{}", std::process::id());
@@ -2006,6 +2166,23 @@ pub fn restart(r: &dyn Runner, env: &Env) -> Result<(), String> {
     r.restart_now(&under)
 }
 
+/// With Secure Boot off, the TPM's PCR 7 says nothing about which system was
+/// started: any system on this PC gets the same value, so the key sealed to
+/// it opens the disk for whoever can boot something else. The install goes
+/// ahead (the disk is still encrypted against someone who takes it out of the
+/// PC), but the user is told.
+fn tpm_without_secure_boot(env: &Env, enc: Encryption) -> Option<String> {
+    if !enc.uses_tpm() || secure_boot_on(env) {
+        return None;
+    }
+    Some(if enc == Encryption::TpmPin {
+        "Secure Boot is off on this PC, so the security chip can't tell Telamon OS from any other system started here. The PIN you chose still has to be typed, but turn Secure Boot on in the firmware settings for full protection."
+    } else {
+        "Secure Boot is off on this PC, so the security chip opens the disk for any system started here, not only Telamon OS. The disk is protected only if it is taken out of this PC. Turn Secure Boot on in the firmware settings, or reinstall with a password or a PIN."
+    }
+    .into())
+}
+
 /// Replace bootupd's "Fedora" firmware entry for our ESP with "Telamon OS".
 /// The new entry is made first, so a failure never leaves none. `Err`: no
 /// Telamon OS entry was made; `Ok` lists old entries that could not be removed.
@@ -2239,7 +2416,7 @@ fn execute(
         Some(t) => log.note(&format!("# the image is {} uncompressed", gb(t))),
         None => log.note("# the image's size is unknown: the copy moves the bar by time"),
     }
-    let cmd = bootc(&p.image, target, &p.kargs);
+    let cmd = bootc(&p.image, target, &p.kargs, p.sigpolicy.is_ok());
     let started = Instant::now();
     let mut bp = BootcProgress::default();
     let mut meter = CopyMeter::new(env.host("proc"), std::process::id());
@@ -2379,6 +2556,14 @@ fn execute(
     }
     // A missing label doesn't stop the system from booting; say so and go on.
     let mut warnings = Vec::new();
+    if let Err(why) = &p.sigpolicy {
+        warnings.push(format!(
+            "The new system was not told to require Telamon OS's signature on its updates ({why}). Its update service records that at its first update check."
+        ));
+    }
+    if let Some(w) = tpm_without_secure_boot(env, req.encryption) {
+        warnings.push(w);
+    }
     let label_warning = |e: String| {
         format!(
             "Some settings files may have the wrong SELinux label ({e}). After restarting, run sudo restorecon -R /etc."

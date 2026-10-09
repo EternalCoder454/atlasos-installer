@@ -53,6 +53,7 @@ Rectangle {
     }
 
     QQC2.Label {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 2
         visible: list.count === 0 && frame.emptyText.length > 0

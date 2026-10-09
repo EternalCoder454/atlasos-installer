@@ -17,7 +17,11 @@ build=build/app-live
 cmake -S app -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
 echo "$versions" >"$build/built-with"
 cmake --build "$build"
-cargo build --release --locked -p telamon-installer-helper
+# The helper runs as root: full RELRO and a non-executable stack are asked for
+# by name (rustc's defaults, which a toolchain change could drop), and
+# scripts/check-hardening.sh reads the result back below.
+RUSTFLAGS="${RUSTFLAGS:-} -C relro-level=full -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,noexecstack" \
+	cargo build --release --locked -p telamon-installer-helper
 
 out=build/live-installer
 rm -rf "$out"
@@ -28,5 +32,10 @@ install -Dm644 -t "$root/share/dbus-1/system.d" helper/data/dbus-1/system.d/*
 install -Dm644 -t "$root/share/dbus-1/system-services" helper/data/dbus-1/system-services/*
 install -Dm644 -t "$root/share/polkit-1/actions" helper/data/polkit-1/actions/*
 install -Dm644 -t "$root/lib/systemd/system" helper/data/systemd/*
+
+# What is staged is what the live image gets: refuse programs without the
+# hardening (docs/SECURITY.md, "Build hardening").
+scripts/check-hardening.sh --cxx "$root/bin/telamon-installer"
+scripts/check-hardening.sh "$root/libexec/telamon-installer-helper"
 
 echo "$versions" >"$out/built-with"

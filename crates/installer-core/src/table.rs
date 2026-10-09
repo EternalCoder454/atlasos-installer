@@ -92,8 +92,10 @@ impl Table {
         }
         gaps.into_iter()
             .filter_map(|(start, end)| {
-                let start = start.div_ceil(align) * align;
-                let end_excl = (end + 1) / align * align;
+                // a hostile table can name the last sector of the number
+                // range: nothing here may overflow
+                let start = start.div_ceil(align).checked_mul(align)?;
+                let end_excl = end.saturating_add(1) / align * align;
                 (end_excl > start).then(|| Region {
                     start,
                     sectors: end_excl - start,
@@ -322,6 +324,35 @@ mod tests {
         assert!(change(&|a| a.label = "dos".into()).is_err());
         // lower-case GUIDs are the same GUIDs
         assert!(change(&|a| a.partitions[0].kind = a.partitions[0].kind.to_lowercase()).is_ok());
+    }
+
+    #[test]
+    fn a_table_naming_the_last_sector_of_the_number_range_does_not_overflow() {
+        // A hostile disk can say anything in its GPT header; the release
+        // build has overflow checks on, so an overflow would be a panic in
+        // ListDisks for every disk.
+        let mut t = Table::parse(WINDOWS).unwrap();
+        t.partitions.clear();
+        t.firstlba = Some(0);
+        t.lastlba = Some(u64::MAX);
+        let regions = t.free_regions();
+        assert_eq!(regions.len(), 1);
+        assert!(regions[0].start.checked_add(regions[0].sectors).is_some());
+        // a partition that starts near the top, and one that is as big as the range
+        t.firstlba = Some(u64::MAX - 5000);
+        t.partitions.push(Partition {
+            node: "/dev/sda1".into(),
+            start: u64::MAX - 10,
+            size: u64::MAX,
+            kind: crate::gpt::LINUX_FS.into(),
+            uuid: None,
+            name: None,
+        });
+        let _ = t.free_regions();
+        let _ = t.largest_free();
+        t.sectorsize = u64::MAX;
+        let _ = t.free_regions();
+        assert_eq!(t.bytes(u64::MAX), u64::MAX);
     }
 
     #[test]

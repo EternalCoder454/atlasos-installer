@@ -70,6 +70,7 @@ InstallerPage {
             }
         }
         QQC2.Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.gridUnit
             horizontalAlignment: Text.AlignHCenter
@@ -93,6 +94,7 @@ InstallerPage {
             subtitle: page.backend.installError
         }
         QQC2.Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             // No log when the helper never started (polkit said no); the
             // helper's message usually names the log already.

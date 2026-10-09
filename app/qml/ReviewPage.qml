@@ -122,6 +122,7 @@ InstallerPage {
             }
 
             QQC2.Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
                 text: qsTr("Installing takes a few minutes and can't be stopped once it has started. You'll create your account after the restart.")

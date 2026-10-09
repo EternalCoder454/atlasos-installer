@@ -56,9 +56,9 @@ creates the enablement symlinks), `tests/`.
 ## Add an app
 
 Add one line to `apps.json` with an `install` of `flatpak:<app id>`, `mise`,
-`mise:<tool>` or `toolbox:<packages>`. `gh` comes through mise's registry
-(with aqua checksum checks) at its latest version; only mise itself is
-pinned and hashed. To bump mise, change `MISE_VERSION` and
+`mise:<tool>` or `toolbox:<packages>`. `gh` and `ollama` come through mise's registry
+(the `aqua` backend; see "What is downloaded") at their latest version; only
+mise itself is pinned and hashed. To bump mise, change `MISE_VERSION` and
 `MISE_SHA256` in the script together.
 
 ## Local AI
@@ -79,6 +79,36 @@ Nothing pulls a model: they are several GB each, so the user pulls them from
 Alpaca (or `ollama pull`) later. The standalone `ollama` CLI still needs
 `ollama serve`, and the archive mise fetches has no AMD ROCm backend (upstream
 ships it separately); AMD cards use its Vulkan one.
+
+## What is downloaded, from where, and how it is checked
+
+Nothing in the record is executed or used as a URL: its ids are looked up in
+the catalog (root-owned, in the image), and the lookup's result is matched
+against a strict pattern before it reaches a command line (a flatpak id, a
+mise tool name or a package name never starts with `-`). Both modes refuse a
+record that is not root-owned or is group- or world-writable.
+
+| What | From | Checked by |
+|---|---|---|
+| Flathub remote | `https://dl.flathub.org/repo/flathub.flatpakrepo` (`flatpak remote-add --if-not-exists`) | TLS; the remote's GPG key comes in that file, and flatpak checks the signature of every commit it installs |
+| Flatpak apps and add-ons (`com.jeffser.Alpaca` and its `Plugins.Ollama` and `Plugins.AMD`, browsers, VS Code) | Flathub | the OSTree commit signature (Flathub's key), whose build recipe pins the sha256 of every source. Flathub is a community store: the add-ons are the apps' authors' builds, not Telamon's or Fedora's |
+| mise | `https://github.com/jdx/mise/releases/download/<MISE_VERSION>/` | `curl --proto =https --tlsv1.2`, a size limit, and the pinned SHA-256 (`MISE_SHA256`), checked before the file is made executable |
+| `gh` (`mise use -g gh`) | GitHub release of `cli/cli`, through mise's `aqua` backend | the release's digest from GitHub, and the GitHub artifact attestation (a signed build provenance), which mise verifies; a failure to reach the attestation service stops the install |
+| `ollama` (`mise use -g ollama`) | GitHub release of `ollama/ollama`, through the `aqua` backend | only the digest GitHub lists for the file (it detects a damaged download, not a malicious release): ollama publishes no signature or attestation. TLS to github.com is the trust anchor |
+| Toolbox image | `registry.fedoraproject.org/fedora-toolbox:<release>` (`toolbox create`) | TLS and the system's container policy, which accepts images outside Telamon OS's own without a signature |
+| Toolbox packages (`gdb strace perf`) | Fedora's repositories, `dnf install` in the toolbox | `gpgcheck` of the repositories |
+
+`gh` and `ollama` are installed at their latest version (`latest` in the
+account's mise configuration), so a new install gets what upstream has
+published that day; only mise itself is pinned. When mise runs, its
+environment (`MISE_SAFE_ENV` in the script) turns off every backend that runs
+third-party code (`asdf` and `vfox` plugins, `cargo`, `go`, `npm`, `pypi`,
+`gem`, ...: `mise registry gh` lists `aqua` and then an `asdf` plugin, and the
+plugin is a git repository whose scripts would run as the account) and sets
+the verification switches (cosign, SLSA, minisign, GitHub attestations,
+fail when the attestation service cannot be reached) to on, so a setting in the
+account's own environment cannot weaken them for this install. A tool for the
+catalog must therefore come from `aqua` (or a mise core tool).
 
 ## Tests
 

@@ -24,6 +24,21 @@ const BOOTC_OUT: &str = "Installing image: docker://ghcr.io/eternalcoder454/atla
     Finalizing filesystem root\n\
     Installation complete!\n";
 
+/// policy.json as the Telamon OS image build writes it.
+const POLICY: &str = r#"{
+  "default": [{"type": "reject"}],
+  "transports": {
+    "docker": {
+      "": [{"type": "insecureAcceptAnything"}],
+      "ghcr.io/eternalcoder454/telamonos": [{"type": "sigstoreSigned", "keyPaths": ["/etc/pki/containers/telamon.pub"], "signedIdentity": {"type": "matchRepository"}}],
+      "ghcr.io/eternalcoder454/telamonos-nvidia": [{"type": "sigstoreSigned", "keyPaths": ["/etc/pki/containers/telamon.pub"], "signedIdentity": {"type": "matchRepository"}}],
+      "ghcr.io/eternalcoder454/atlasos": [{"type": "sigstoreSigned", "keyPaths": ["/etc/pki/containers/telamon.pub"], "signedIdentity": {"type": "matchRepository"}}],
+      "ghcr.io/eternalcoder454/atlasos-nvidia": [{"type": "sigstoreSigned", "keyPaths": ["/etc/pki/containers/telamon.pub"], "signedIdentity": {"type": "matchRepository"}}]
+    },
+    "containers-storage": {"": [{"type": "insecureAcceptAnything"}]}
+  }
+}"#;
+
 #[derive(Default)]
 struct Fake {
     calls: Mutex<Vec<Cmd>>,
@@ -58,6 +73,13 @@ struct Fake {
     /// `cryptsetup close` fails as busy and `--deferred` "succeeds" without
     /// closing the map.
     close_only_deferred: bool,
+    /// A hostile deployment tree: after bootc, a symlink is put at each of
+    /// these places (relative to the target) pointing to the given path.
+    plant: Vec<(String, PathBuf)>,
+    /// The password the last `cryptsetup luksAddKey` was given on stdin.
+    added: Mutex<Option<String>>,
+    /// lsblk prints this instead of the Windows fixture.
+    lsblk_text: Option<String>,
 }
 
 fn ok(stdout: &str) -> Result<Output, String> {
@@ -206,7 +228,7 @@ impl Runner for Fake {
                         v["blockdevices"][0]["children"][at]["children"] = serde_json::json!([]);
                         v.to_string()
                     }
-                    (None, None) => LSBLK.to_string(),
+                    (None, None) => self.lsblk_text.clone().unwrap_or_else(|| LSBLK.to_string()),
                 })
             }
             ("cryptsetup", ["open", "--allow-discards", "--key-file", _, part, mapper]) => {
@@ -271,7 +293,9 @@ impl Runner for Fake {
                 let i = rest.iter().position(|a| *a == "--key-file").unwrap();
                 let right = if rest[i + 1] == "-" {
                     let given = cmd.stdin.as_deref().unwrap_or_default();
-                    given == RECOVERY_KEY || given == PASSWORD
+                    given == RECOVERY_KEY
+                        || given == PASSWORD
+                        || lock(&self.added).as_deref() == Some(given)
                 } else {
                     // the temporary key, which luksRemoveKey made useless
                     !calls
@@ -282,6 +306,10 @@ impl Runner for Fake {
                     code: Some(if right { 0 } else { 2 }),
                     ..Default::default()
                 })
+            }
+            ("cryptsetup", ["luksAddKey", ..]) => {
+                *lock(&self.added) = cmd.stdin.clone();
+                ok("")
             }
             ("grub2-mkpasswd-pbkdf2", []) => {
                 let given = cmd.stdin.as_deref().unwrap_or_default();
@@ -311,6 +339,12 @@ impl Runner for Fake {
                 }
                 ok(&serde_json::json!({"keyslots": keyslots, "tokens": tokens}).to_string())
             }
+            // another disk's table: none
+            ("sfdisk", ["--json", other]) if *other != "/dev/sda" => Ok(Output {
+                code: Some(1),
+                stdout: String::new(),
+                stderr: "sfdisk: cannot open".into(),
+            }),
             ("sfdisk", ["--json", "/dev/sda"]) => match &*lock(&self.table) {
                 Some(t) => ok(&serde_json::json!({ "partitiontable": t }).to_string()),
                 None => Ok(Output {
@@ -386,6 +420,14 @@ impl Runner for Fake {
                     "",
                 )
                 .unwrap();
+                for (rel, to) in &self.plant {
+                    let at = self.target.join(rel);
+                    fs::create_dir_all(at.parent().unwrap())
+                        .unwrap_or_else(|e| panic!("plant {rel}: {e}"));
+                    let _ = fs::remove_file(&at);
+                    std::os::unix::fs::symlink(to, &at)
+                        .unwrap_or_else(|e| panic!("plant {rel}: {e}"));
+                }
                 ok(BOOTC_OUT)
             }
             ("efibootmgr", []) => {
@@ -478,6 +520,18 @@ impl World {
             put(rel, b"");
             fs::set_permissions(env.root.join(rel), fs::Permissions::from_mode(0o755)).unwrap();
         }
+        // The container policy the Telamon OS image carries (its build.sh):
+        // a default that rejects, a sigstore requirement for the repositories,
+        // the key, and the registries.d line that finds the signatures.
+        put("etc/containers/policy.json", POLICY.as_bytes());
+        put(
+            "etc/pki/containers/telamon.pub",
+            b"-----BEGIN PUBLIC KEY-----\nTEST\n-----END PUBLIC KEY-----\n",
+        );
+        put(
+            "etc/containers/registries.d/telamon.yaml",
+            b"docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: true\n",
+        );
         put(
             "usr/share/systemd/kbd-model-map",
             b"de-latin1-nodeadkeys\tde\tpc105\tnodeadkeys\tterminate:ctrl_alt_bksp\n",
@@ -572,7 +626,8 @@ fn free_space_beside_windows() {
             "mount /dev/sda5 T/boot",
             "mount /dev/sda1 T/boot/efi",
             "bootc install to-filesystem --source-imgref containers-storage:ghcr.io/eternalcoder454/atlasos:stable \
-             --target-imgref ghcr.io/eternalcoder454/atlasos:stable --skip-fetch-check --karg rootflags=compress=zstd:1 T",
+             --target-imgref ghcr.io/eternalcoder454/atlasos:stable --skip-fetch-check --enforce-container-sigpolicy \
+             --karg rootflags=compress=zstd:1 T",
             "mount -o remount,rw,barrier T",
             "sync /dev/sda6",
             "mount -o remount,rw T/boot",
@@ -1371,9 +1426,12 @@ fn enc_req(disk: &str, mode: &str, enc: &str, password: &str) -> Request {
 }
 
 impl World {
+    /// A PC with a TPM 2.0 and Secure Boot on (the TPM modes then have
+    /// nothing to warn about).
     fn with_tpm(self) -> World {
         self.put("sys/class/tpm/tpm0/tpm_version_major", b"2\n");
         self.put("dev/tpmrm0", b"");
+        self.put(SECURE_BOOT_VAR, &[6, 0, 0, 0, 1]);
         self
     }
 
@@ -1440,7 +1498,7 @@ fn tpm_encryption_runs_these_commands() {
         [
             "wipefs --all --quiet /dev/sda6".to_string(),
             format!(
-                "cryptsetup luksFormat --type luks2 --batch-mode --uuid U --label atlasos --key-file {KEY} /dev/sda6"
+                "cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --pbkdf argon2id --batch-mode --uuid U --label atlasos --key-file {KEY} /dev/sda6"
             ),
             format!("cryptsetup open --allow-discards --key-file {KEY} /dev/sda6 luks-U"),
             "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
@@ -1542,12 +1600,14 @@ fn password_encryption_puts_the_password_on_stdin_only() {
         [
             format!("wipefs --all --quiet {root}"),
             format!(
-                "cryptsetup luksFormat --type luks2 --batch-mode --uuid U --label atlasos --key-file {KEY} {root}"
+                "cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --pbkdf argon2id --batch-mode --uuid U --label atlasos --key-file {KEY} {root}"
             ),
             format!("cryptsetup open --allow-discards --key-file {KEY} {root} luks-U"),
             "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
             format!("systemd-cryptenroll --unlock-key-file={KEY} --recovery-key {root}"),
-            format!("cryptsetup luksAddKey --key-file {KEY} --new-keyfile - {root}"),
+            format!(
+                "cryptsetup luksAddKey --pbkdf argon2id --key-file {KEY} --new-keyfile - {root}"
+            ),
             format!("cryptsetup luksRemoveKey --key-file {KEY} {root}"),
             format!(
                 "cryptsetup open --test-passphrase --disable-external-tokens --key-file {KEY} {root}"
@@ -2108,7 +2168,7 @@ fn tpm_with_a_pin_puts_the_pin_in_the_environment_only() {
         [
             "wipefs --all --quiet /dev/sda6".to_string(),
             format!(
-                "cryptsetup luksFormat --type luks2 --batch-mode --uuid U --label atlasos --key-file {KEY} /dev/sda6"
+                "cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --pbkdf argon2id --batch-mode --uuid U --label atlasos --key-file {KEY} /dev/sda6"
             ),
             format!("cryptsetup open --allow-discards --key-file {KEY} /dev/sda6 luks-U"),
             "mkfs.btrfs -q -f -L atlasos /dev/mapper/luks-U".into(),
@@ -2959,3 +3019,6 @@ fn the_chosen_apps_are_recorded_for_the_first_start() {
     );
     assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
 }
+
+#[path = "secure_tests.rs"]
+mod secure;

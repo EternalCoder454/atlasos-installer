@@ -23,12 +23,13 @@ _loader = importlib.machinery.SourceFileLoader("fba", str(SCRIPT))
 fba = importlib.util.module_from_spec(importlib.util.spec_from_loader("fba", _loader))
 _loader.exec_module(fba)
 
-MISE_BODY = '#!/bin/sh\necho "mise $*" >> "$FAKE_LOG"\n'
+# (printf, not echo: dash's echo turns "\\" into a backslash escape, bash's does not)
+MISE_BODY = '#!/bin/sh\nprintf "%s\\n" "mise $*" >> "$FAKE_LOG"\n'
 
 # Every fake logs its arguments to $FAKE_LOG. FAIL_<NAME>=1 makes it exit 1, and
 # FAIL_MATCH=<text> makes any fake fail when its arguments contain the text.
 FAKE = """#!/bin/sh
-echo "$(basename "$0") $*" >> "$FAKE_LOG"
+printf '%s\\n' "$(basename "$0") $*" >> "$FAKE_LOG"
 name=$(basename "$0" | tr a-z A-Z)
 eval "fail=\\${FAIL_$name:-}"
 [ -n "$fail" ] && exit 1
@@ -465,6 +466,150 @@ class Packaging(unittest.TestCase):
         user = (HERE.parent / "units" / "telamon-first-boot-apps.user.service").read_text()
         for path in ("/var/lib/telamon/first-boot-apps.status", "/var/lib/atlasos/first-boot-apps.status"):
             self.assertIn("ConditionPathExists=|" + path + "\n", user)
+
+
+class Secure(Base):
+    """The Secure phase: what is downloaded and run, and what it may be made of."""
+
+    def test_mise_runs_with_only_the_backends_that_download_and_check(self):
+        body = '#!/bin/sh\nenv | grep ^MISE_ | sort >> "$FAKE_LOG"\n'
+        self.write_record(["gh", "ollama"])
+        with mock.patch.object(fba, "MISE_SHA256", hashlib.sha256(body.encode()).hexdigest()):
+            # the account's own environment says the opposite
+            hostile = dict(FAKE_MISE=body, MISE_DISABLE_BACKENDS="", MISE_AQUA_COSIGN="0",
+                           MISE_AQUA_SLSA="0", MISE_AQUA_MINISIGN="0", MISE_GITHUB_ATTESTATIONS="0",
+                           MISE_AQUA_GITHUB_ATTESTATIONS="false", MISE_SLSA="0",
+                           MISE_PROVENANCE_API_FAILURES_FATAL="0")
+            self.assertEqual(self.run_mode("user", **hostile), 0)
+        seen = dict(l.split("=", 1) for l in self.calls("MISE_"))
+        seen = {k: v for k, v in seen.items() if k in fba.MISE_SAFE_ENV}  # (the shell adds MISE_SHELL)
+        self.assertEqual(seen, fba.MISE_SAFE_ENV)
+        disabled = seen["MISE_DISABLE_BACKENDS"].split(",")
+        # the registry's fallbacks run third-party scripts or builds: off
+        for backend in ("asdf", "vfox", "cargo", "go", "npm", "pypi", "gem"):
+            self.assertIn(backend, disabled)
+        # aqua, which does the checking, and the core tools stay
+        for backend in ("aqua", "core"):
+            self.assertNotIn(backend, disabled)
+        for k in ("MISE_AQUA_COSIGN", "MISE_AQUA_SLSA", "MISE_AQUA_MINISIGN", "MISE_AQUA_GITHUB_ATTESTATIONS",
+                  "MISE_GITHUB_ATTESTATIONS", "MISE_SLSA", "MISE_PROVENANCE_API_FAILURES_FATAL"):
+            self.assertEqual(seen[k], "1", k)
+        # nothing that answers a prompt or skips a check
+        for k in seen:
+            self.assertNotIn("YES", k)
+            self.assertNotIn("SKIP", k)
+            self.assertNotIn("PARANOID", k)
+
+    def test_mise_is_fetched_over_https_from_its_pinned_release_and_checked(self):
+        self.assertTrue(fba.MISE_URL.startswith("https://github.com/jdx/mise/releases/download/%s/" % fba.MISE_VERSION))
+        self.assertRegex(fba.MISE_VERSION, r"^v\d{4}\.\d+\.\d+$")
+        self.assertRegex(fba.MISE_SHA256, r"^[0-9a-f]{64}$")
+        self.assertTrue(fba.FLATHUB_REPO.startswith("https://dl.flathub.org/"))
+        self.write_record(["gh"])
+        self.assertEqual(self.run_mode("user"), 0)
+        curl = self.calls("curl")[0].split()
+        for want in ("--fail", "--proto", "=https", "--tlsv1.2", "--max-filesize"):
+            self.assertIn(want, curl)
+        self.assertEqual(curl[-1], fba.MISE_URL)
+        # never "latest", never an http URL, nothing piped to a shell
+        self.assertNotIn("latest", fba.MISE_URL)
+        self.assertNotIn("|", " ".join(curl))
+
+    def test_the_binary_is_not_kept_unless_its_checksum_matches(self):
+        self.write_record(["gh"])
+        self.assertEqual(self.run_mode("user", FAKE_MISE="#!/bin/sh\nevil\n"), 0)
+        self.assertEqual(list((self.home / "bin").iterdir()), [])
+        self.assertEqual(self.calls("mise"), [])
+
+    def test_whatever_the_catalog_names_is_an_id_a_package_or_a_tool_never_an_option(self):
+        catalog = json.loads(CATALOG.read_text())
+        ids = [e["id"] for e in catalog]
+        self.write_record(ids)
+        with mock.patch.object(fba, "has_amd_gpu", return_value=True):
+            self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.run_mode("user"), 0)
+        calls = self.calls()
+        self.assertTrue(calls)
+        for c in calls:
+            prog, _, rest = c.partition(" ")
+            args = rest.split()
+            if prog == "flatpak" and args[:1] == ["install"]:
+                refs = args[args.index("flathub") + 1:]
+                self.assertTrue(refs and all(fba.FLATPAK_RE.match(r) for r in refs), c)
+            if prog == "flatpak" and args[:1] == ["remote-add"]:
+                self.assertEqual(args[-1], fba.FLATHUB_REPO)
+            if prog == "mise":
+                tools = args[args.index("-g") + 1:]
+                self.assertTrue(tools and all(fba.TOOL_RE.match(t) and not t.startswith("-") for t in tools), c)
+            if prog == "toolbox" and args[:1] == ["run"]:
+                pkgs = args[args.index("-y") + 1:]
+                self.assertTrue(pkgs and all(fba.PKG_RE.match(p) for p in pkgs), c)
+        # every entry is understood: nothing is skipped for looking odd, nothing is run raw
+        entries, unknown = fba.classify(ids, fba.load_catalog())
+        self.assertEqual(unknown, [])
+        self.assertEqual(len(entries), len(ids))
+
+    def test_ids_and_values_that_could_be_options_or_urls_are_never_run(self):
+        hostile = ["--help", "-rf", "../x", "https://example.com/x.flatpakref", "a b", "a;b", "$(x)",
+                   "firefox\n--system", "A" * 100, ""]
+        self.write_record(hostile + ["firefox"])
+        self.assertEqual(self.run_mode("system"), 0)
+        self.assertEqual(self.calls("flatpak install"), [
+            "flatpak install --system -y --noninteractive flathub org.mozilla.firefox"])
+        for h in hostile:
+            self.assertFalse([c for c in self.calls() if h and h in c], h)
+        # a catalog entry with such a value is skipped as not understood
+        bad = [{"id": "x", "group": "developer", "name": "x", "summary": "x", "install": i}
+               for i in ("flatpak:--user", "flatpak:a.b/../c", "mise:-g", "mise:a b", "toolbox:-y gdb",
+                         "toolbox:gdb;reboot", "toolbox:", "other:thing", "flatpak:org.x.Y --user")]
+        cat = Path(self.tmp.name) / "bad-catalog.json"
+        cat.write_text(json.dumps(bad))
+        with mock.patch.object(fba, "CATALOG", cat):
+            entries, unknown = fba.classify(["x"], fba.load_catalog())
+        self.assertEqual(entries, [])
+        self.assertEqual(unknown, ["x"])
+        for i in range(len(bad)):
+            cat.write_text(json.dumps([dict(bad[i], id="x")]))
+            with mock.patch.object(fba, "CATALOG", cat):
+                self.assertEqual(fba.classify(["x"], fba.load_catalog())[0], [], bad[i]["install"])
+
+    def test_user_mode_ignores_a_record_that_is_not_the_systems(self):
+        self.write_record(["gh", "debug"])
+        self.record.chmod(0o666)  # anyone could have written it
+        with mock.patch.object(fba, "CHECK_OWNER", True):
+            self.assertEqual(self.run_mode("user"), 0)
+        self.assertEqual(self.calls("mise"), [])
+        self.assertEqual(self.calls("toolbox"), [])
+        self.assertFalse((self.home / "bin").exists() and list((self.home / "bin").iterdir()))
+
+    def test_the_units_keep_their_sandbox_and_run_the_script_with_one_word(self):
+        units = HERE.parent / "units"
+        system = (units / "telamon-first-boot-apps.service").read_text()
+        user = (units / "telamon-first-boot-apps.user.service").read_text()
+        for k in ("NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectHome=yes", "ProtectSystem=full",
+                  "ProtectKernelModules=yes", "ProtectClock=yes", "ProtectHostname=yes",
+                  "RestrictSUIDSGID=yes", "RestrictRealtime=yes", "LockPersonality=yes",
+                  "SystemCallArchitectures=native"):
+            self.assertIn(k + "\n", system, k)
+        self.assertIn("ExecStart=/usr/libexec/telamon/telamon-first-boot-apps system\n", system)
+        self.assertIn("ExecStart=/usr/libexec/telamon/telamon-first-boot-apps user\n", user)
+        # the user unit says why it has no NoNewPrivileges
+        self.assertNotIn("\nNoNewPrivileges", user)
+        for text in (system, user):
+            self.assertNotIn("Environment", text)
+            self.assertNotIn("User=root", text)
+            self.assertEqual(text.count("ExecStart="), 1)
+
+    def test_the_record_is_only_read_from_the_systems_own_places(self):
+        src = SCRIPT.read_text()
+        for line in ('RECORD = Path("/var/lib/telamon/first-boot-apps.json")',
+                     'LEGACY_RECORD = Path("/var/lib/atlasos/first-boot-apps.json")',
+                     'CATALOG = Path("/usr/share/telamon/first-boot-apps.json")'):
+            self.assertIn("\n" + line + "\n", src)
+        # the test hooks are module globals; the script reads no environment override
+        self.assertNotIn("TELAMON_FBA", src)
+        reads = [l.strip() for l in src.splitlines() if "os.environ" in l and "XDG_RUNTIME_DIR" not in l]
+        self.assertEqual(reads, ["env=dict(os.environ, **env) if env else None)"])  # (the child's environment)
 
 
 class Notify(Base):

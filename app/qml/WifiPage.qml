@@ -170,6 +170,7 @@ InstallerPage {
         RowLayout {
             Layout.fillWidth: true
             QQC2.Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: qsTr("Networks")
                 font.bold: true

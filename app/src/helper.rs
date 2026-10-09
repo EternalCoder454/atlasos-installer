@@ -177,7 +177,10 @@ pub async fn install(
         disk, fp, mode, locale, keymap, wifi, encryption, password, &apps
     ))
     .map_err(map);
-    drop(args);
+    // the password or PIN is in there: wipe the copies this side made
+    for a in args {
+        crate::wipe(a);
+    }
     forward.abort();
     r
 }
