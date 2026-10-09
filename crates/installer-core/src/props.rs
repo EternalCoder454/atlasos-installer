@@ -578,6 +578,20 @@ proptest! {
             plan_is_safe(&p)?;
             // the old partitions are kept: nothing is wiped
             prop_assert!(p.wipe.is_empty());
+            // and, worked out again in wider numbers than the plan's own, no new
+            // partition touches an old one, whatever the table claimed, or the
+            // sectors outside the usable range
+            let (first, last) = p.usable;
+            for new in &p.parts {
+                let (a, b) = (u128::from(new.start), u128::from(new.start) + u128::from(new.size));
+                prop_assert!(a >= u128::from(first) && b <= u128::from(last) + 1);
+                prop_assert_eq!(new.start % (crate::ALIGN_BYTES / p.sector_size).max(1), 0);
+                for old in &t.partitions {
+                    let (c, d) = (u128::from(old.start), u128::from(old.start) + u128::from(old.size));
+                    prop_assert!(b <= c || d <= a, "{:?} overlaps {:?}", new, old);
+                    prop_assert!(old.node != new.node);
+                }
+            }
         }
         let _ = plan::in_use(&d);
         let _ = plan::reusable_esp(&t, &esps);

@@ -65,16 +65,22 @@ pub fn disk_rows(list: &DiskList) -> Vec<DiskRow> {
 /// The disk's name, made unique when another disk has the same name and
 /// size: "Samsung SSD 990 PRO, serial …4F2A" if the serials end
 /// differently, else "Virtual disk, /dev/vdb".
+///
+/// The model and serial come from the disk itself (a USB stick chooses them),
+/// so they are shown the way SSIDs are: control and format characters (bidi
+/// overrides, zero-width marks) are replaced, runs of spaces become one, and
+/// a long name is cut.
 fn disk_name(d: &Disk, all: &[Disk]) -> String {
     let twins: Vec<&Disk> = all
         .iter()
         .filter(|o| o.name == d.name && size(o.size) == size(d.size))
         .collect();
+    let name = crate::network::sanitize_name(&d.name);
     if twins.len() < 2 {
-        return d.name.clone();
+        return name;
     }
     let tail = |x: &Disk| -> Option<String> {
-        let s = x.serial.as_deref()?;
+        let s = crate::network::sanitize_name(x.serial.as_deref()?);
         let n = s.chars().count();
         Some(s.chars().skip(n.saturating_sub(4)).collect())
     };
@@ -85,8 +91,8 @@ fn disk_name(d: &Disk, all: &[Disk]) -> String {
             .enumerate()
             .all(|(i, t)| !tails[..i].contains(t));
     match tail(d) {
-        Some(t) if distinct => format!("{}, serial …{t}", d.name),
-        _ => format!("{}, {}", d.name, d.path),
+        Some(t) if distinct => format!("{name}, serial …{t}"),
+        _ => format!("{name}, {}", d.path),
     }
 }
 
@@ -741,6 +747,35 @@ mod tests {
         assert_eq!(size(8 * GIB + GIB / 2), "8.5 GB");
         assert_eq!(size(16 * 1024 * GIB), "16 TB");
         assert_eq!(size_of_free(400 * GIB + GIB - 1), "400 GB");
+    }
+
+    #[test]
+    fn a_disk_chooses_its_name_but_not_how_it_is_shown() {
+        let mut list = fixture();
+        list.disks[0].name = "Samsung\u{202e} SSD\n\u{200b}990\u{0}   PRO".into();
+        list.disks[1].serial = Some("S6Z1\u{202e}NF0W104F2A\u{85}".into());
+        let rows = disk_rows(&list);
+        let shown = &rows[0].title;
+        assert!(!shown.chars().any(|c| c.is_control()), "{shown:?}");
+        assert!(!shown.contains(['\u{202e}', '\u{200b}']), "{shown:?}");
+        assert!(!shown.contains("  "), "{shown:?}");
+        assert!(shown.starts_with("Samsung") && shown.contains("990"));
+        // a very long name is cut
+        list.disks[0].name = "x".repeat(10_000);
+        assert!(disk_rows(&list)[0].title.chars().count() <= 64);
+        // twins by serial: the tail is cleaned too
+        let mut twin = list.disks[1].clone();
+        twin.id = "sdz".into();
+        twin.path = "/dev/sdz".into();
+        list.disks.push(twin);
+        list.disks[1].serial = Some("AAAA\u{202e}1234".into());
+        list.disks[4].serial = Some("BBBB5678\u{200b}".into());
+        let rows = disk_rows(&list);
+        for r in [&rows[1], &rows[4]] {
+            assert!(!r.title.contains(['\u{202e}', '\u{200b}']), "{:?}", r.title);
+            assert!(r.title.contains("serial …"), "{:?}", r.title);
+        }
+        assert_ne!(rows[1].title, rows[4].title);
     }
 
     #[test]
