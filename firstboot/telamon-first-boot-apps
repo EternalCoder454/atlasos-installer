@@ -32,6 +32,28 @@ MISE_URL = ("https://github.com/jdx/mise/releases/download/%s/mise-%s-linux-x64"
 MISE_SHA256 = "8d48bc510b7d844fad0bc7156c0855c2a1e7230c51e498a7f6b63b021f8b57c5"
 FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
+# mise runs as the account and downloads programs. Its registry lists a fallback
+# for many tools (`mise registry gh`: aqua first, then asdf): an asdf or vfox
+# plugin is a third-party git repository whose scripts run as the account, and
+# cargo, go, npm, pypi, gem and the like run a build or an install script.
+# None of that is used here: only the backends that download a release and
+# check it (aqua, which checks the release's checksum and, where its registry
+# lists them, the cosign or minisign signature, the SLSA provenance and the
+# GitHub artifact attestation). The verification switches are set to what mise
+# does by default, so a setting in the account's own environment cannot weaken
+# them for this install, and a failure to reach the attestation service stops
+# the install (as by default) instead of skipping the check.
+MISE_ENV = {
+    "MISE_DISABLE_BACKENDS": "asdf,vfox,cargo,go,npm,pypi,gem,dotnet,spm,conda,packslip",
+    "MISE_AQUA_COSIGN": "1",
+    "MISE_AQUA_SLSA": "1",
+    "MISE_AQUA_MINISIGN": "1",
+    "MISE_AQUA_GITHUB_ATTESTATIONS": "1",
+    "MISE_GITHUB_ATTESTATIONS": "1",
+    "MISE_SLSA": "1",
+    "MISE_PROVENANCE_API_FAILURES_FATAL": "1",
+}
+
 RECORD = Path("/var/lib/telamon/first-boot-apps.json")
 STATUS = Path("/var/lib/telamon/first-boot-apps.status")
 CATALOG = Path("/usr/share/telamon/first-boot-apps.json")
@@ -226,11 +248,13 @@ def classify(ids, catalog):
     return out, unknown
 
 
-def run(cmd, timeout):
-    """Run an argument list. Returns (returncode, output tail); timeout gives -1, missing -2."""
+def run(cmd, timeout, env=None):
+    """Run an argument list. Returns (returncode, output tail); timeout gives -1, missing -2.
+    `env` adds variables to the environment of the command."""
     try:
         p = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, timeout=timeout)
+                           stderr=subprocess.STDOUT, timeout=timeout,
+                           env=dict(os.environ, **env) if env else None)
     except subprocess.TimeoutExpired:
         return -1, "timed out after %d s" % timeout
     except OSError as e:
@@ -238,8 +262,8 @@ def run(cmd, timeout):
     return p.returncode, p.stdout.decode("utf-8", "replace").strip()[-2000:]
 
 
-def check(cmd, timeout, what):
-    rc, out = run(cmd, timeout)
+def check(cmd, timeout, what, env=None):
+    rc, out = run(cmd, timeout, env)
     if rc != 0:
         log("%s failed (%s): %s" % (what, rc, out))
         if rc == -2:
@@ -527,7 +551,8 @@ def do_mise(tools):
     mise = retry(install_mise)
     if tools:
         start_notice()
-        retry(lambda: check([str(mise), "use", "-g"] + tools, 1800, "Installing developer tools"))
+        retry(lambda: check([str(mise), "use", "-g"] + tools, 1800, "Installing developer tools",
+                            MISE_ENV))
 
 
 def do_toolbox(pkgs):
@@ -547,7 +572,8 @@ def do_toolbox(pkgs):
 
 def user_mode():
     try:
-        ids = load_record()
+        # as in system mode: a record that is not the system's own is not acted on
+        ids = load_record(check_owner=True)
     except Failed as e:
         log(e.reason)  # system mode sets a bad record aside and reports it
         ids = None
