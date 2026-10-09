@@ -132,15 +132,61 @@ pub fn check(policy: &str, image: &str, key_exists: &dyn Fn(&str) -> bool) -> Re
 }
 
 /// Whether a registries.d file tells containers/image to look for sigstore
-/// signatures beside the images: a line `use-sigstore-attachments: true`
-/// (without it a signature required by the policy is never found).
-pub fn attachments_enabled(registries_d_file: &str) -> bool {
-    registries_d_file.lines().any(|l| {
-        let l = l.trim();
-        !l.starts_with('#')
-            && l.strip_prefix("use-sigstore-attachments:")
-                .is_some_and(|v| v.split('#').next().unwrap_or("").trim() == "true")
-    })
+/// signatures beside `image` (`use-sigstore-attachments: true`; without it a
+/// signature the policy requires is never found). Only a setting that applies
+/// to the image counts: under `default-docker`, or under a `docker` scope that
+/// is the image's repository or one of its namespaces or its registry (the
+/// longest such scope decides). The file is read as the small YAML it is
+/// (`docker:` / scope / setting, by indentation); wildcards are not followed,
+/// so an odd file means "not proven", never a wrong yes.
+pub fn attachments_enabled(registries_d_file: &str, image: &str) -> bool {
+    let repo = repository(image);
+    let applies = |scope: &str| {
+        !scope.is_empty() && (repo == scope || repo.starts_with(&format!("{scope}/")))
+    };
+    let (mut top, mut scope): (&str, String) = ("", String::new());
+    let mut default_setting: Option<bool> = None;
+    let mut best: Option<(usize, bool)> = None;
+    for line in registries_d_file.lines() {
+        let body = line.split('#').next().unwrap_or("");
+        let indent = body.len() - body.trim_start().len();
+        let t = body.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = t.split_once(':') else {
+            continue;
+        };
+        let (key, value) = (key.trim().trim_matches(['"', '\'']), value.trim());
+        if indent == 0 {
+            top = match key {
+                "default-docker" => "default-docker",
+                "docker" => "docker",
+                _ => "",
+            };
+            scope.clear();
+        } else if key == "use-sigstore-attachments" {
+            let on = match value {
+                "true" => true,
+                "false" => false,
+                _ => continue,
+            };
+            match top {
+                "default-docker" => default_setting = Some(on),
+                "docker"
+                    if !scope.is_empty()
+                        && applies(&scope)
+                        && best.is_none_or(|(len, _)| scope.len() >= len) =>
+                {
+                    best = Some((scope.len(), on));
+                }
+                _ => {}
+            }
+        } else if top == "docker" && value.is_empty() {
+            scope = key.to_string();
+        }
+    }
+    best.map(|(_, on)| on).or(default_setting).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -295,21 +341,34 @@ mod tests {
 
     #[test]
     fn signatures_are_looked_for_only_when_registries_d_says_so() {
-        assert!(attachments_enabled(
-            "docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: true\n"
-        ));
-        assert!(attachments_enabled(
-            "use-sigstore-attachments: true # yes\n"
-        ));
+        let yes = [
+            "docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io:\n    use-sigstore-attachments: true # yes\n",
+            "docker:\n  ghcr.io/eternalcoder454/atlasos:\n    use-sigstore-attachments: true\n",
+            "default-docker:\n  use-sigstore-attachments: true\n",
+            "docker:\n  \"ghcr.io/eternalcoder454\":\n    lookaside: https://x\n    use-sigstore-attachments: true\n",
+            // a more specific scope wins over a broader one, in both directions
+            "default-docker:\n  use-sigstore-attachments: false\ndocker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: true\n",
+        ];
+        for y in yes {
+            assert!(attachments_enabled(y, IMAGE), "{y:?}");
+        }
         for no in [
             "",
-            "use-sigstore-attachments: false\n",
-            "# use-sigstore-attachments: true\n",
-            "xuse-sigstore-attachments: true\n",
-            "use-sigstore-attachments: truex\n",
-            "lookaside: https://example.com\n",
+            "use-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: false\n",
+            "docker:\n  ghcr.io/eternalcoder454:\n    # use-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io/eternalcoder454:\n    xuse-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: truex\n",
+            "docker:\n  ghcr.io/eternalcoder454:\n    lookaside: https://example.com\n",
+            // another registry, another namespace, a look-alike prefix
+            "docker:\n  docker.io:\n    use-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io/eternalcoder4540:\n    use-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io/eternalcoder454/other:\n    use-sigstore-attachments: true\n",
+            "docker:\n  ghcr.io/eternalcoder454/atlasos:\n    use-sigstore-attachments: false\n  ghcr.io:\n    use-sigstore-attachments: true\n",
+            "default-docker:\n  use-sigstore-attachments: true\ndocker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: false\n",
         ] {
-            assert!(!attachments_enabled(no), "{no:?}");
+            assert!(!attachments_enabled(no, IMAGE), "{no:?}");
         }
     }
 }

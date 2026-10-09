@@ -496,6 +496,28 @@ fn a_policy_that_does_not_prove_it_installs_as_before_and_says_so() {
             }),
         ),
         (
+            "not set to look for Telamon OS's signatures",
+            // a setting for another registry says nothing about this image
+            Box::new(|w| {
+                w.put(
+                    "etc/containers/registries.d/telamon.yaml",
+                    b"docker:\n  docker.io:\n    use-sigstore-attachments: true\n",
+                )
+            }),
+        ),
+        (
+            "not set to look for Telamon OS's signatures",
+            // containers/image reads *.yaml only
+            Box::new(|w| {
+                fs::remove_file(w.env.root.join("etc/containers/registries.d/telamon.yaml"))
+                    .unwrap();
+                w.put(
+                    "etc/containers/registries.d/telamon.yml",
+                    b"docker:\n  ghcr.io/eternalcoder454:\n    use-sigstore-attachments: true\n",
+                )
+            }),
+        ),
+        (
             "no readable container policy",
             // a policy too big to be one
             Box::new(|w| w.put("etc/containers/policy.json", &vec![b' '; 2 << 20])),

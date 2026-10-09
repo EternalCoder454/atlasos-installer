@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(telamon-installer VERSION 0.2.0 LANGUAGES CXX)
+project(telamon-installer VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,12 @@ corrosion_set_env_vars(telamon_installer QMAKE=${QMAKE6})
 
 qt_add_executable(telamon-installer-app cpp/main.cpp)
 set_target_properties(telamon-installer-app PROPERTIES OUTPUT_NAME telamon-installer)
+# The hardening Fedora's package flags give (docs/SECURITY.md, "Build
+# hardening"; scripts/check-hardening.sh reads it back): a position-independent
+# program, stack protectors, full RELRO, no executable stack.
+target_compile_options(telamon-installer-app PRIVATE -fPIE -fstack-protector-strong
+    -fstack-clash-protection -fcf-protection=full)
+target_link_options(telamon-installer-app PRIVATE -pie -Wl,-z,relro,-z,now,-z,noexecstack)
 target_compile_definitions(telamon-installer-app PRIVATE TELAMON_INSTALLER_VERSION="${PROJECT_VERSION}")
 # The QML type registration includes localeinfo.h by its bare name.
 target_include_directories(telamon-installer-app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cpp)

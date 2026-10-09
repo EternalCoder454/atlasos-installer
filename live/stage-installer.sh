@@ -35,7 +35,7 @@ install -Dm644 -t "$root/lib/systemd/system" helper/data/systemd/*
 
 # What is staged is what the live image gets: refuse programs without the
 # hardening (docs/SECURITY.md, "Build hardening").
-scripts/check-hardening.sh --cxx "$root/bin/telamon-installer-app"
+scripts/check-hardening.sh --cxx "$root/bin/telamon-installer"
 scripts/check-hardening.sh "$root/libexec/telamon-installer-helper"
 
 echo "$versions" >"$out/built-with"

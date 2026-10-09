@@ -36,13 +36,17 @@ if [ "${1:-}" = podman ]; then
 	# Nothing privileged: a file in the container is all it touches. Never :Z.
 	exec podman run --rm --ulimit core=0 --security-opt label=disable \
 		--security-opt no-new-privileges -v "$repo":/src -w /src \
-		-e CARGO_TARGET_DIR=/src/target/container "$image" tests/container/crypt-flow.sh
+		-e CARGO_TARGET_DIR=/src/target/container -e CRYPT_FLOW_REQUIRE="${CRYPT_FLOW_REQUIRE:-}" \
+		"$image" tests/container/crypt-flow.sh
 fi
 update=0
 [ "${1:-}" = --update-fixtures ] && update=1
 
+# CRYPT_FLOW_REQUIRE=1 (CI): a tool that is missing or cannot run is a failure,
+# not a pass that tested nothing.
 skip() {
 	echo "crypt-flow: skipped: $*"
+	[ "${CRYPT_FLOW_REQUIRE:-}" = 1 ] && exit 1
 	exit 0
 }
 for tool in cryptsetup systemd-cryptenroll jq truncate; do

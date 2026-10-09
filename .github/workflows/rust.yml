@@ -97,5 +97,8 @@ jobs:
       - name: First-start script
         run: env -u DISPLAY -u WAYLAND_DISPLAY python3 -m unittest discover -s firstboot/tests -v
 
+      # A tool that can't run is a failure here, not a skipped test.
       - name: Encryption tools in a container
+        env:
+          CRYPT_FLOW_REQUIRE: "1"
         run: tests/container/crypt-flow.sh podman

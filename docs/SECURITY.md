@@ -96,8 +96,8 @@ partition table, an ESP), NetworkManager keyfiles.
 - **The image reference** is built from constants (`ghcr.io/eternalcoder454/atlasos[-nvidia]:stable`)
   and a flag; nothing from the caller reaches it. *Test:* `the_image_comes_from_constants_only`.
 - **A hostile partition table** (`lastlba = u64::MAX`, huge sector sizes) no
-  longer overflows (the release build panics on overflow: `overflow-checks`
-  is on). *Tests:* `a_table_naming_the_last_sector_of_the_number_range_does_not_overflow`,
+  longer overflows (and the helper's release build panics on an overflow
+  rather than wrapping: `overflow-checks` is on). *Tests:* `a_table_naming_the_last_sector_of_the_number_range_does_not_overflow`,
   `describing_a_plan_from_absurd_numbers_does_not_overflow`.
 - **A hostile ESP** is mounted read-only with `nosuid,nodev,noexec`, as `vfat`,
   only to look for Windows' boot manager and free space.
@@ -112,7 +112,8 @@ partition table, an ESP), NetworkManager keyfiles.
   when the live system's own policy proves it will work: `policy.json` has a
   `default` that does not accept everything, the most specific `docker` scope
   of the image holds only `sigstoreSigned` requirements whose key files exist,
-  and a `registries.d` file reads sigstore attachments (`sigpolicy::check`).
+  and a `registries.d` `*.yaml` file turns sigstore attachments on for that image's
+  registry or namespace (`sigpolicy::check`, `sigpolicy::attachments_enabled`).
   The installed system's origin is then `ostree-image-signed`, so its first
   update is already signature-checked. When the policy does not prove it, the
   install goes ahead as before and `Outcome.warnings` says so (the image's
@@ -140,7 +141,10 @@ partition table, an ESP), NetworkManager keyfiles.
 - LUKS2 with named parameters (`aes-xts-plain64`, 512-bit key, `sha256`,
   `argon2id`), not the defaults of the cryptsetup build. *Test:*
   `the_luks_parameters_are_named_and_not_left_to_the_build_of_cryptsetup`.
-- The UI wipes its own copies of the disk password, PIN and Wi-Fi password.
+- The UI wipes the copies of the disk password, PIN and Wi-Fi password it made
+  once the call is over (best effort: the QML property, Qt's string and zbus's
+  serialized message are not under its control, and on an error path before the
+  call the copies are only dropped).
   *Test:* `wiping_zeroes_the_whole_buffer`.
 - Real tools: `tests/container/crypt-flow.sh podman` runs the real `cryptsetup`
   and `systemd-cryptenroll` on regular files in an unprivileged container and
@@ -214,7 +218,7 @@ partition table, an ESP), NetworkManager keyfiles.
     Flathub's GPG signs the repository.
   - `mise` itself is pinned (`MISE_VERSION`) and its SHA-256 is checked before
     it is made executable (`curl --proto =https --tlsv1.2 --max-filesize`).
-    mise runs with only the backends that download and check (`MISE_ENV`:
+    mise runs with only the backends that download and check (`MISE_SAFE_ENV`:
     `asdf`, `vfox`, `cargo`, `go`, `npm`, `pypi`, `gem`, `dotnet`, `spm`,
     `conda` disabled, since an `asdf` plugin is a third-party git repository
     whose scripts run as the user) and with cosign, SLSA, minisign and GitHub
@@ -225,7 +229,7 @@ partition table, an ESP), NetworkManager keyfiles.
 ## 8. Build hardening and supply chain
 
 - **Programs:** the helper is built with full RELRO, `BIND_NOW` and a
-  non-executable stack asked for by name, and `overflow-checks` on. `scripts/check-hardening.sh`
+  non-executable stack asked for by name, and `overflow-checks` on (the workspace's release profile: the helper and `installer-core` as the helper links it; the UI's own build has no `overflow-checks`). `scripts/check-hardening.sh`
   reads the finished programs back with `readelf` (position-independent,
   `GNU_RELRO` and `BIND_NOW`, no executable stack, no `RPATH`, no text
   relocations, stack protectors in the C++ UI) and `live/stage-installer.sh`

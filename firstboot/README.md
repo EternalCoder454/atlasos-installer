@@ -101,7 +101,7 @@ record that is not root-owned or is group- or world-writable.
 `gh` and `ollama` are installed at their latest version (`latest` in the
 account's mise configuration), so a new install gets what upstream has
 published that day; only mise itself is pinned. When mise runs, its
-environment (`MISE_ENV` in the script) turns off every backend that runs
+environment (`MISE_SAFE_ENV` in the script) turns off every backend that runs
 third-party code (`asdf` and `vfox` plugins, `cargo`, `go`, `npm`, `pypi`,
 `gem`, ...: `mise registry gh` lists `aqua` and then an `asdf` plugin, and the
 plugin is a git repository whose scripts would run as the account) and sets

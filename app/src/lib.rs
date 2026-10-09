@@ -61,6 +61,26 @@ mod tests {
         ("WifiPage", include_str!("../qml/WifiPage.qml")),
     ];
 
+    /// A new page must be added to the list above, or its labels go unchecked.
+    #[test]
+    fn the_list_of_qml_files_is_all_of_them() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("qml");
+        let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter_map(|e| {
+                e.file_name()
+                    .to_str()?
+                    .strip_suffix(".qml")
+                    .map(String::from)
+            })
+            .collect();
+        on_disk.sort();
+        let mut listed: Vec<String> = QML.iter().map(|(n, _)| (*n).to_string()).collect();
+        listed.sort();
+        assert_eq!(on_disk, listed);
+    }
+
     #[test]
     fn every_label_shows_plain_text() {
         let mut seen = 0;

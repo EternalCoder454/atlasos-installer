@@ -43,7 +43,9 @@ FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 # does by default, so a setting in the account's own environment cannot weaken
 # them for this install, and a failure to reach the attestation service stops
 # the install (as by default) instead of skipping the check.
-MISE_ENV = {
+# (every name below is a setting of mise v2026.10.3: `mise settings ls --all`; the
+# script runs `mise use -g gh` with them, checked against the real binary)
+MISE_SAFE_ENV = {
     "MISE_DISABLE_BACKENDS": "asdf,vfox,cargo,go,npm,pypi,gem,dotnet,spm,conda,packslip",
     "MISE_AQUA_COSIGN": "1",
     "MISE_AQUA_SLSA": "1",
@@ -552,7 +554,7 @@ def do_mise(tools):
     if tools:
         start_notice()
         retry(lambda: check([str(mise), "use", "-g"] + tools, 1800, "Installing developer tools",
-                            MISE_ENV))
+                            MISE_SAFE_ENV))
 
 
 def do_toolbox(pkgs):

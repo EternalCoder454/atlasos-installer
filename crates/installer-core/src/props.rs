@@ -293,7 +293,7 @@ proptest! {
         let r = sigpolicy::repository(&image);
         prop_assert!(image.starts_with(r));
         prop_assert!(!r.contains('@'));
-        let _ = sigpolicy::attachments_enabled(&policy);
+        let _ = sigpolicy::attachments_enabled(&policy, &image);
     }
 
     #[test]

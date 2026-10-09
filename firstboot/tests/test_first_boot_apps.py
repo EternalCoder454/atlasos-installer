@@ -481,8 +481,8 @@ class Secure(Base):
                            MISE_PROVENANCE_API_FAILURES_FATAL="0")
             self.assertEqual(self.run_mode("user", **hostile), 0)
         seen = dict(l.split("=", 1) for l in self.calls("MISE_"))
-        seen = {k: v for k, v in seen.items() if k in fba.MISE_ENV}  # (the shell adds MISE_SHELL)
-        self.assertEqual(seen, fba.MISE_ENV)
+        seen = {k: v for k, v in seen.items() if k in fba.MISE_SAFE_ENV}  # (the shell adds MISE_SHELL)
+        self.assertEqual(seen, fba.MISE_SAFE_ENV)
         disabled = seen["MISE_DISABLE_BACKENDS"].split(",")
         # the registry's fallbacks run third-party scripts or builds: off
         for backend in ("asdf", "vfox", "cargo", "go", "npm", "pypi", "gem"):

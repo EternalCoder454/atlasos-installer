@@ -541,7 +541,8 @@ fn image_policy(env: &Env, image: &str) -> Result<(), String> {
             .filter(|e| {
                 let n = e.file_name();
                 let n = n.to_string_lossy();
-                n.ends_with(".yaml") || n.ends_with(".yml")
+                // containers/image reads only *.yaml
+                n.ends_with(".yaml")
             })
             .take(64)
             .filter_map(|e| {
@@ -551,7 +552,7 @@ fn image_policy(env: &Env, image: &str) -> Result<(), String> {
                     64 * 1024,
                 )
             })
-            .any(|t| sigpolicy::attachments_enabled(&t))
+            .any(|t| sigpolicy::attachments_enabled(&t, image))
     });
     if found {
         Ok(())
