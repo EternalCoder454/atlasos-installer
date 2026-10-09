@@ -125,6 +125,7 @@ InstallerPage {
                     running: parent.visible
                 }
                 QQC2.Label {
+                    textFormat: Text.PlainText
                     text: qsTr("Looking for disks…")
                     opacity: 0.7
                 }
@@ -162,6 +163,7 @@ InstallerPage {
                         onClicked: page.choose(modelData)
 
                         QQC2.Label {
+                            textFormat: Text.PlainText
                             visible: diskRow.modelData.usb
                             text: qsTr("USB")
                             font: Kirigami.Theme.smallFont
@@ -222,6 +224,7 @@ InstallerPage {
                     onClicked: page.app.mode = "erase"
                 }
                 QQC2.Label {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.largeSpacing
                     visible: page.app.mode === ""
@@ -289,6 +292,7 @@ InstallerPage {
                         onTextChanged: page.app.passwordConfirm = text
                     }
                     QQC2.Label {
+                        textFormat: Text.PlainText
                         readonly property string problem: page.backend.secretHint(page.app.encryption, page.app.password, page.app.passwordConfirm)
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap

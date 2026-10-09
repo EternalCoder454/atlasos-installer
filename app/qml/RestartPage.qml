@@ -45,6 +45,7 @@ InstallerPage {
             spacing: Kirigami.Units.gridUnit
 
             QQC2.Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
                 wrapMode: Text.Wrap
@@ -67,6 +68,7 @@ InstallerPage {
                     spacing: Kirigami.Units.largeSpacing
 
                     QQC2.Label {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: qsTr("Write it down or take a photo with your phone, and keep it away from this PC. You need it if Telamon OS ever asks for it, for example after a firmware or security-chip change, or if the disk moves to another PC.")
@@ -109,6 +111,7 @@ InstallerPage {
                         Layout.fillWidth: true
                         spacing: Kirigami.Units.largeSpacing
                         QQC2.Label {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: savedSwitch.Accessible.name
@@ -136,6 +139,7 @@ InstallerPage {
                     spacing: Kirigami.Units.largeSpacing
 
                     QQC2.Label {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: qsTr("Secure Boot is on, so the computer must trust the Telamon OS key before the NVIDIA driver can load. After the restart a blue screen appears. It waits only 10 seconds, so stay close:")
@@ -154,11 +158,13 @@ InstallerPage {
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.largeSpacing
                             QQC2.Label {
+                                textFormat: Text.PlainText
                                 Layout.alignment: Qt.AlignTop
                                 text: (mokStep.index + 1) + "."
                                 font.weight: Font.DemiBold
                             }
                             QQC2.Label {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
                                 text: mokStep.modelData
@@ -173,6 +179,7 @@ InstallerPage {
                         radius: TelamonStyle.radiusLarge
                         color: TelamonStyle.selection
                         QQC2.Label {
+                            textFormat: Text.PlainText
                             id: pw
                             anchors.centerIn: parent
                             text: page.mok.replace(/(\d{4})(\d{4})/, "$1 $2")

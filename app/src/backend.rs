@@ -692,7 +692,7 @@ impl qobject::Backend {
                 |e| e,
             )
             .await;
-            drop(password);
+            crate::wipe(password);
             let _ = qt.queue(move |mut obj| {
                 // The error first: the page reads it when `connecting` clears.
                 match r {
