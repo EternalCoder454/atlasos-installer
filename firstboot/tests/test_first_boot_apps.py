@@ -23,12 +23,13 @@ _loader = importlib.machinery.SourceFileLoader("fba", str(SCRIPT))
 fba = importlib.util.module_from_spec(importlib.util.spec_from_loader("fba", _loader))
 _loader.exec_module(fba)
 
-MISE_BODY = '#!/bin/sh\necho "mise $*" >> "$FAKE_LOG"\n'
+# (printf, not echo: dash's echo turns "\\" into a backslash escape, bash's does not)
+MISE_BODY = '#!/bin/sh\nprintf "%s\\n" "mise $*" >> "$FAKE_LOG"\n'
 
 # Every fake logs its arguments to $FAKE_LOG. FAIL_<NAME>=1 makes it exit 1, and
 # FAIL_MATCH=<text> makes any fake fail when its arguments contain the text.
 FAKE = """#!/bin/sh
-echo "$(basename "$0") $*" >> "$FAKE_LOG"
+printf '%s\\n' "$(basename "$0") $*" >> "$FAKE_LOG"
 name=$(basename "$0" | tr a-z A-Z)
 eval "fail=\\${FAIL_$name:-}"
 [ -n "$fail" ] && exit 1
