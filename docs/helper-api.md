@@ -456,7 +456,9 @@ writes one out.
 8. Unmount.
 
 Every command and its output, except secrets, go to
-`/run/telamon-installer/install.log` (mode 0600). Before unmounting, the
+`/run/telamon-installer/install.log` (mode 0600, in `/run/telamon-installer`,
+0700: the log, the folder of the temporary disk key and the mount point of the
+read-only look at an EFI partition are root's alone). Before unmounting, the
 helper keeps a copy of it, and of the firmware's TPM event log
 (`/sys/kernel/security/tpm0/binary_bios_measurements`, when there is one),
 in the new system as `/var/log/telamon-installer/install.log` and

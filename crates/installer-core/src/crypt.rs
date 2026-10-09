@@ -338,6 +338,72 @@ mod tests {
             );
         }
     }
+
+    /// The unit runs as root with the disk's key in reach, so it is the most
+    /// sandboxed thing the installer leaves behind: a failed first start must
+    /// not turn into anything else, and what is left off is left off for a
+    /// reason (the TPM and block devices, the root of the system's files).
+    #[test]
+    fn the_seal_unit_is_sandboxed_and_holds_no_secret() {
+        for enc in [Encryption::Tpm, Encryption::TpmPin] {
+            let unit = seal_unit(enc, UUID).unwrap();
+            let keys: Vec<(&str, &str)> = unit
+                .lines()
+                .filter(|l| !l.starts_with('#') && !l.starts_with('['))
+                .filter_map(|l| l.split_once('='))
+                .collect();
+            let has = |k: &str, v: &str| keys.contains(&(k, v));
+            for (k, v) in [
+                ("Type", "oneshot"),
+                ("NoNewPrivileges", "yes"),
+                ("ProtectSystem", "strict"),
+                ("ReadWritePaths", "/etc/telamon-installer -/run/cryptsetup"),
+                ("PrivateTmp", "yes"),
+                ("PrivateNetwork", "yes"),
+                ("ProtectHome", "yes"),
+                ("ProtectProc", "invisible"),
+                ("ProtectKernelTunables", "yes"),
+                ("ProtectKernelModules", "yes"),
+                ("ProtectKernelLogs", "yes"),
+                ("ProtectControlGroups", "yes"),
+                ("ProtectClock", "yes"),
+                ("ProtectHostname", "yes"),
+                ("CapabilityBoundingSet", "CAP_DAC_OVERRIDE CAP_IPC_LOCK"),
+                ("RestrictAddressFamilies", "AF_UNIX AF_ALG"),
+                ("RestrictNamespaces", "yes"),
+                ("RestrictRealtime", "yes"),
+                ("RestrictSUIDSGID", "yes"),
+                ("LockPersonality", "yes"),
+                ("MemoryDenyWriteExecute", "yes"),
+                ("SystemCallArchitectures", "native"),
+                ("SystemCallFilter", "@system-service"),
+                ("UMask", "0077"),
+                ("TimeoutStartSec", "2min"),
+                ("ConditionPathExists", SEAL_MARKER),
+            ] {
+                assert!(has(k, v), "{k}={v} in\n{unit}");
+            }
+            // it runs once: the marker and the PIN go when the seal worked, and only then
+            let post = keys.iter().find(|(k, _)| *k == "ExecStartPost").unwrap().1;
+            assert_eq!(post, format!("/usr/bin/rm -f {SEAL_PIN} {SEAL_MARKER}"));
+            assert_eq!(
+                keys.iter()
+                    .filter(|(k, _)| k.starts_with("ExecStart"))
+                    .count(),
+                2
+            );
+            // the PIN is a credential, never in an argument or the environment
+            assert!(!unit.contains("Environment"));
+            assert!(!unit.contains("PIN="));
+            let creds = keys.iter().filter(|(k, _)| *k == "LoadCredential").count();
+            assert_eq!(creds, if enc == Encryption::TpmPin { 2 } else { 0 });
+            // it does not ask: no prompt can come from a service with no terminal
+            assert!(!unit.contains("StandardInput"));
+            // no capability beyond reading the key files and locking memory
+            assert!(!unit.contains("CAP_SYS_ADMIN") && !unit.contains("CAP_NET"));
+        }
+    }
+
     const KEY: &str = "ulcbjnni-ehtlcfnl-ntenkltt-vjuiicdf-hvdkerji-fjkurjhr-lckjntdb-kvkeeide";
 
     #[test]

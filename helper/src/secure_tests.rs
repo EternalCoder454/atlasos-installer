@@ -751,7 +751,25 @@ fn canaries_reach_only_the_commands_that_need_them() {
         assert_eq!(mode_of(&saved_path), 0o600);
         assert_eq!(mode_of(saved_path.parent().unwrap()), 0o700);
         assert_eq!(mode_of(&w.env.log_path()), 0o600);
+        // and the helper's run directory is root's alone (it was 0755 once)
+        assert_eq!(mode_of(&w.env.run_dir), 0o700);
     }
+}
+
+#[test]
+fn the_run_directory_is_private_whether_it_existed_or_not() {
+    let w = World::new();
+    fs::create_dir_all(&w.env.run_dir).unwrap();
+    fs::set_permissions(&w.env.run_dir, fs::Permissions::from_mode(0o755)).unwrap();
+    w.install(&request("free-space", "none", "", false, &[]))
+        .0
+        .unwrap();
+    assert_eq!(mode_of(&w.env.run_dir), 0o700);
+    // ListDisks mounts an ESP below it to look: that happens inside the private directory too
+    let w = World::new();
+    fs::set_permissions(&w.env.run_dir, fs::Permissions::from_mode(0o755)).unwrap();
+    list_disks(&w.fake, &w.env).unwrap();
+    assert_eq!(mode_of(&w.env.run_dir), 0o700);
 }
 
 #[tokio::test]

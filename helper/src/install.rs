@@ -100,6 +100,20 @@ impl Env {
     }
 }
 
+/// The helper's run directory (the install log, the ESP probe's mount point,
+/// the temporary disk key's folder), made for root alone: 0700, also when it
+/// was there already with another mode. The log inside is 0600 and the key's
+/// folder 0700 anyway; this keeps what is mounted for the probe and the
+/// names of the files from the live session's user.
+fn make_run_dir(env: &Env) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&env.run_dir)?;
+    fs::set_permissions(&env.run_dir, fs::Permissions::from_mode(0o700))
+}
+
 fn path_str(p: &Path) -> Result<&str, String> {
     p.to_str()
         .ok_or_else(|| format!("{} is not UTF-8", p.display()))
@@ -338,7 +352,7 @@ fn esp_info(r: &dyn Runner, env: &Env, p: &Device) -> Result<Option<EspInfo>, St
         Some(m) if m.starts_with('/') => (env.root.join(m.trim_start_matches('/')), false),
         _ => {
             let dir = env.run_dir.join("esp-probe");
-            if fs::create_dir_all(&dir).is_err() {
+            if make_run_dir(env).is_err() || fs::create_dir_all(&dir).is_err() {
                 return Ok(None);
             }
             let d = path_str(&dir)?;
@@ -1425,8 +1439,7 @@ pub fn install(
     req: &Request,
     emit: &mut dyn FnMut(&Progress),
 ) -> Result<Outcome, String> {
-    fs::create_dir_all(&env.run_dir)
-        .map_err(|e| format!("cannot create {}: {e}", env.run_dir.display()))?;
+    make_run_dir(env).map_err(|e| format!("cannot create {}: {e}", env.run_dir.display()))?;
     let log = Log::create(&env.log_path());
     let lr = LogRunner {
         inner: r,
