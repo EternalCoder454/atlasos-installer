@@ -208,6 +208,23 @@ pub fn in_use(disk: &Device) -> bool {
     })
 }
 
+/// A device path as `lsblk --paths` prints it: `/dev/` and then letters,
+/// digits and `/ _ . -`, with no empty, `.` or `..` component. Never starts
+/// with `-`, so no tool can take it for an option.
+pub fn is_device_path(p: &str) -> bool {
+    let Some(rest) = p.strip_prefix("/dev/") else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest.len() <= 128
+        && rest
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'.' | b'-'))
+        && rest
+            .split('/')
+            .all(|c| !c.is_empty() && c != "." && c != "..")
+}
+
 /// Erase the whole disk.
 pub fn plan_erase(disk: &Device) -> Result<Plan, Unavailable> {
     if disk.size < MIN_INSTALL_BYTES {
@@ -332,6 +349,24 @@ impl Plan {
     /// partition of the disk not in use. The plan functions check this, and
     /// the helper again right before sfdisk.
     pub fn validate(&self) -> Result<(), &'static str> {
+        // Every path that reaches a command is a plain /dev path, and what
+        // is wiped is the disk or one of its own partitions.
+        let paths = std::iter::once(self.disk.as_str())
+            .chain(std::iter::once(self.esp.as_str()))
+            .chain(self.parts.iter().map(|p| p.node.as_str()))
+            .chain(self.wipe.iter().map(String::as_str));
+        for p in paths {
+            if !is_device_path(p) {
+                return Err("a device path is not a plain /dev path");
+            }
+        }
+        if self
+            .wipe
+            .iter()
+            .any(|w| *w != self.disk && partition_number(&self.disk, w).is_none())
+        {
+            return Err("a signature would be wiped from a device that is not on this disk");
+        }
         let align = (crate::ALIGN_BYTES / self.sector_size.max(1)).max(1);
         let (first, last) = self.usable;
         let old = self.before.as_ref().map_or(&[][..], |t| &t.partitions[..]);
@@ -424,7 +459,7 @@ impl Plan {
 
     /// A readable summary, for `telamon-installer-helper --plan`.
     pub fn describe(&self) -> String {
-        let mib = |sectors: u64| sectors * self.sector_size / crate::MIB;
+        let mib = |sectors: u64| sectors.saturating_mul(self.sector_size) / crate::MIB;
         let mut s = String::new();
         let _ = writeln!(s, "disk {} ({})", self.disk, self.mode.as_str());
         if !self.wipe.is_empty() {
@@ -510,6 +545,75 @@ mod tests {
                 fedora: false,
             },
         )])
+    }
+
+    #[test]
+    fn device_paths_are_plain() {
+        for ok in [
+            "/dev/sda",
+            "/dev/sda1",
+            "/dev/nvme0n1p3",
+            "/dev/mapper/luks-0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f",
+            "/dev/disk/by-uuid/ABCD-1234",
+        ] {
+            assert!(is_device_path(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "/dev",
+            "/dev/",
+            "sda",
+            "-rf",
+            "--help",
+            "/dev/../etc/passwd",
+            "/dev/./sda",
+            "/dev//sda",
+            "/dev/sda/",
+            "/dev/sda\n",
+            "/dev/sd a",
+            "/dev/sda\0",
+            "/dev/sda;reboot",
+            "/dev/$(reboot)",
+            "/dev/s\u{202e}da",
+            "/tmp/sda",
+            "/devx/sda",
+        ] {
+            assert!(!is_device_path(bad), "{bad:?}");
+        }
+        assert!(!is_device_path(&format!(
+            "/dev/{}",
+            "a".repeat(10 * 1024 * 1024)
+        )));
+    }
+
+    #[test]
+    fn a_plan_with_a_device_that_is_not_a_plain_dev_path_is_refused() {
+        let good = plan_erase(&blank(64)).unwrap();
+        assert_eq!(good.validate(), Ok(()));
+        for edit in [
+            |p: &mut Plan| p.disk = "-rf".into(),
+            |p: &mut Plan| p.esp = "/dev/../etc/shadow".into(),
+            |p: &mut Plan| p.parts[1].node = "/dev/vda2 --force".into(),
+            |p: &mut Plan| p.wipe.push("/dev/vdb".into()),
+            |p: &mut Plan| p.wipe.push("--all".into()),
+            |p: &mut Plan| p.wipe.push("/dev/vda\n/dev/vdb".into()),
+        ] {
+            let mut p = good.clone();
+            edit(&mut p);
+            assert!(p.validate().is_err(), "{p:?}");
+        }
+        // the disk's own partitions and the disk are what a plan may wipe
+        let mut p = good;
+        p.wipe = vec!["/dev/vda1".into(), "/dev/vda7".into(), "/dev/vda".into()];
+        assert_eq!(p.validate(), Ok(()));
+    }
+
+    #[test]
+    fn describing_a_plan_from_absurd_numbers_does_not_overflow() {
+        let mut p = plan_erase(&blank(64)).unwrap();
+        p.sector_size = u64::MAX;
+        p.parts[0].size = u64::MAX;
+        assert!(p.describe().contains("create:"));
     }
 
     #[test]

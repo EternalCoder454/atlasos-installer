@@ -126,7 +126,20 @@ firmware's BootNext to the new Telamon OS entry, so leaving it in is safe.
 
 `warnings` covers things that went wrong without failing the install: the
 firmware entry could not be renamed, an SELinux label was not set, the NVIDIA
-key was not queued, or the final unmount failed. Show them to the user.
+key was not queued, or the final unmount failed. Two more are about security:
+
+- "The new system was not told to require Telamon OS's signature on its
+  updates (<why>)": the live system's container policy did not prove that the
+  installed system's updates would be checked (see "What an install does",
+  step 3), so bootc ran without `--enforce-container-sigpolicy`. Telamon OS's
+  update service records the check at its first update check.
+- "Secure Boot is off on this PC ...", for `tpm` and `tpm-pin`: with Secure Boot
+  off the TPM's PCR 7 does not say which system was started, so the security
+  chip opens the disk for any system started on this PC (with `tpm-pin` the PIN
+  is still needed). The disk is protected only against someone who takes it
+  out of the PC. Nothing else changes; the install went ahead.
+
+Show them to the user.
 
 While Install runs:
 
@@ -239,7 +252,8 @@ for the root partition `<node>`, with a random UUID `<uuid>` and a random
 `/run/telamon-installer`, deleted whatever happens):
 
 1. `wipefs --all --quiet <node>`
-2. `cryptsetup luksFormat --type luks2 --batch-mode --uuid <uuid> --label atlasos --key-file <key> <node>`
+2. `cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --pbkdf argon2id --batch-mode --uuid <uuid> --label atlasos --key-file <key> <node>`
+   (the parameters are named, so no cryptsetup build's default decides them)
 3. `cryptsetup open --allow-discards --key-file <key> <node> luks-<uuid>`, then
    `mkfs.btrfs` on `/dev/mapper/luks-<uuid>`, which is mounted at the target
 4. `systemd-cryptenroll --unlock-key-file=<key> --recovery-key <node>`: the
@@ -255,7 +269,7 @@ for the root partition `<node>`, with a random UUID `<uuid>` and a random
    the environment variable `NEWPIN` (never in the arguments). cryptsetup
    can't be given the PIN without a prompt, so the TPM unlock is not
    proven here, only that the enrolment succeeded.
-   `password`: `cryptsetup luksAddKey --key-file <key> --new-keyfile - <node>`
+   `password`: `cryptsetup luksAddKey --pbkdf argon2id --key-file <key> --new-keyfile - <node>`
    with the password on stdin (no newline, never in arguments or the
    environment)
 6. `cryptsetup luksRemoveKey --key-file <key> <node>`, then checks that the
@@ -391,6 +405,24 @@ writes one out.
    - `ghcr.io/eternalcoder454/atlasos:stable`, or
    - `atlasos-nvidia:stable` when the live system carries the NVIDIA
      signing key.
+
+   The reference is built from constants (repository, one of those two names,
+   the tag `stable`); nothing from the caller is in it. It is given as
+   `--source-imgref containers-storage:<image> --target-imgref <image>`.
+   When the live system's own container policy proves that updates will be
+   checked against Telamon OS's signature, bootc also gets
+   `--enforce-container-sigpolicy`, so the new system's origin is
+   `ostree-image-signed:docker://...` from the start. The proof is what the
+   image build writes: the first of `/etc/containers/policy.json` and
+   `/usr/share/containers/policy.json` that exists (bootc reads the same) has
+   a `default` without `insecureAcceptAnything`; the `docker` entry that
+   applies to the image's repository (the most specific scope: the reference,
+   the repository, its namespaces, the host, `*.` parent domains, `""`) has only
+   `sigstoreSigned` requirements whose keys (`keyPath(s)`, all of them) are
+   existing files, or inline keys; and a `registries.d` file has
+   `use-sigstore-attachments: true`. Anything else (no policy, unreadable or
+   over 1 MiB, a missing key) installs as before and adds the warning above.
+   The install only reads those files; it does not change them.
 4. Remount read-write, then write these files into the new deployment's
    `/etc`:
    - `locale.conf`
@@ -403,9 +435,18 @@ writes one out.
      keyboard pages, and the Wi-Fi page when it's online. The same file is
      also written as `atlasos/installer.ini`, where Atlas Installer put it, for
      the wizard of an image built before the rename (Telamon Setup reads either).
-   - the Wi-Fi keyfile, with `permissions=` removed and mode 0600
+   - the Wi-Fi keyfile, with `permissions=` and `interface-name=` removed and
+     mode 0600. It is the one file of the chosen connection, from
+     NetworkManager's system-connections directories (a regular file under
+     64 KiB, not a link), and only if it is a Wi-Fi connection (`type=wifi`)
+     and plain text (a NUL or another control character refuses it).
 
    Label them with the new system's own SELinux policy (`setfiles -r`).
+   Every one is written without following a link anywhere on its path (the
+   directories are walked with descriptors, the file is made under a temporary
+   name and renamed); a link where a directory should be fails the write. The
+   directory of a private file (`/etc/telamon-installer`, the kept logs) is made
+   0700 whether it was there or not.
 5. With Windows on a surviving ESP: write `/boot/grub2/custom.cfg`, which
    chainloads Windows and sets `timeout=5`.
 6. Create the "Telamon OS" firmware boot entry, then delete bootupd's "Fedora"

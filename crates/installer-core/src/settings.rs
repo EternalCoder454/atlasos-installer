@@ -167,9 +167,21 @@ pub fn validate_uuid(s: &str) -> Result<(), String> {
 /// which would tie it to the live session's user, and without
 /// `interface-name=`, which NetworkManager adds on AddAndActivateConnection
 /// and which would keep a USB adapter on another port from connecting.
+///
+/// Only a Wi-Fi connection is copied (`type=wifi` in `[connection]`, or its
+/// old name `802-11-wireless`), and only text: a NUL or another control
+/// character (a keyfile is read line by line) refuses the file. A VPN or a
+/// bridge profile, which the Wi-Fi page never offers, is not carried over.
 pub fn keyfile_for_install(keyfile: &str, uuid: &str) -> Option<String> {
+    if keyfile
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return None;
+    }
     let mut section = "";
     let mut found = false;
+    let mut wifi = false;
     let mut out = String::with_capacity(keyfile.len());
     for line in keyfile.lines() {
         let t = line.trim();
@@ -180,6 +192,7 @@ pub fn keyfile_for_install(keyfile: &str, uuid: &str) -> Option<String> {
         {
             match k.trim() {
                 "uuid" => found |= v.trim().eq_ignore_ascii_case(uuid),
+                "type" => wifi |= matches!(v.trim(), "wifi" | "802-11-wireless"),
                 "permissions" | "interface-name" => continue,
                 _ => {}
             }
@@ -187,7 +200,7 @@ pub fn keyfile_for_install(keyfile: &str, uuid: &str) -> Option<String> {
         out.push_str(line);
         out.push('\n');
     }
-    found.then_some(out)
+    (found && wifi).then_some(out)
 }
 
 #[cfg(test)]
@@ -334,8 +347,31 @@ mod tests {
             keyfile_for_install(kf, "11111111-2a0c-4d5e-9f1a-3c2b1a0d9e8f"),
             None
         );
+        // only a Wi-Fi connection is carried over, and only plain text
+        let with = |extra: &str| {
+            format!(
+                "[connection]\nid=x\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\n{extra}\n[wifi]\nssid=x\n"
+            )
+        };
+        let id = "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f";
+        assert!(keyfile_for_install(&with("type=wifi"), id).is_some());
+        assert!(keyfile_for_install(&with("type=802-11-wireless"), id).is_some());
+        for bad in [
+            "type=vpn",
+            "type=bridge",
+            "type=ethernet",
+            "type=wifi\0",
+            "type=wifi\x1b[2J",
+            "",
+        ] {
+            assert_eq!(keyfile_for_install(&with(bad), id), None, "{bad:?}");
+        }
+        // a type outside [connection] doesn't count either
+        let moved = format!("{}\n[x]\ntype=wifi\n", with(""));
+        assert_eq!(keyfile_for_install(&moved, id), None);
         // a uuid key outside [connection] doesn't count
-        let other = "[connection]\nid=x\n[wifi]\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\n";
+        let other =
+            "[connection]\nid=x\ntype=wifi\n[wifi]\nuuid=0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f\n";
         assert_eq!(
             keyfile_for_install(other, "0b4f6b8e-2a0c-4d5e-9f1a-3c2b1a0d9e8f"),
             None
