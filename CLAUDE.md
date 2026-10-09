@@ -47,6 +47,8 @@ Phase 0 results are in Atlas Notes, under `AtlasOS/Atlas Installer/Roadmap`.
 |---|---|
 | Tests | `env -u DISPLAY -u WAYLAND_DISPLAY cargo test --workspace` |
 | Build | `cargo build --release -p telamon-installer-helper` |
+| Real encryption tools | `tests/container/crypt-flow.sh podman` (cryptsetup and systemd-cryptenroll on files, in an unprivileged container; also checks installer-core's parsers against their real output) |
+| Property tests | `PROPTEST_CASES=20000 cargo test --workspace --locked -- props` |
 | Lint and format | see below (clippy and rustfmt are not on the host) |
 | Build the UI | `app/dev.sh` (output in `build/app/telamon-installer`) |
 | UI tests, lint, qmllint | `app/dev.sh bash -c 'cd app && cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cd .. && cmake --build build/app --target all_qmllint'` |
