@@ -1,7 +1,38 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
+Secure phase. The threat model, the rules and the tests that hold them are in
+`docs/SECURITY.md`.
+
+- Install: `bootc install` is told to enforce the image's signature policy
+  (`--enforce-container-sigpolicy`) when the live system's own policy proves it
+  will work, so the first update of an installed system is already
+  signature-checked; otherwise the install goes ahead as before and says so in
+  the warnings.
+- Encryption: LUKS2 parameters are named (aes-xts-plain64, 512-bit key,
+  sha256, argon2id) instead of left to the cryptsetup build. A TPM disk on a
+  PC with Secure Boot off comes with a warning: the TPM then opens it for any
+  system started on that PC.
+- Input from disks and tools: device paths must be plain `/dev` paths and wipe
+  targets the chosen disk's own; a partition table with absurd numbers no
+  longer panics the helper; the Wi-Fi connection carried over must be a Wi-Fi
+  connection without control characters.
+- Files and logs: directories of private files (the TPM PIN, the saved
+  logs) are forced to 0700, `/run/telamon-installer` is 0700, and the prepared
+  install never prints the Wi-Fi keyfile.
+- UI: the disk password, PIN and Wi-Fi password copies are wiped; every label
+  shows plain text; disk model and serial are sanitized like Wi-Fi names.
+- First start: `mise` runs with only the backends that download and check
+  (no `asdf` plugins, which run a third party's scripts) and with signature
+  and attestation verification forced on; the user part also requires the app
+  record to be owned by root.
+- Build and CI: `cargo-deny` and `cargo-audit` (every change and every week),
+  property tests with 20000 cases, the real `cryptsetup` and
+  `systemd-cryptenroll` tests in a container, and a hardening check
+  (PIE, full RELRO, no executable stack, stack protectors) the live image
+  build and CI run on the built programs; release builds panic on integer
+  overflow.
 - UI polish: Telamon.Ui's scroll bar everywhere (the lists and the pages), lists
   and choice cards in the same card colours as the sections, Title Case
   headings ("Web Browser", "Developer Tools", "How to Install on <disk>",

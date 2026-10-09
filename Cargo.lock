@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "installer-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "serde",
@@ -554,7 +554,7 @@ dependencies = [
 
 [[package]]
 name = "telamon-installer-helper"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "getrandom 0.3.4",
  "installer-core",
