@@ -9,8 +9,9 @@ on:
       - crates/**
       - helper/**
       - scripts/**
-      # installer-core embeds the apps list
-      - firstboot/apps.json
+      - tests/container/**
+      # installer-core embeds the apps list; the script is tested here too
+      - firstboot/**
       - Cargo.toml
       - Cargo.lock
       - .github/workflows/rust.yml
@@ -80,3 +81,21 @@ jobs:
           scripts/test-check-hardening.sh
           cargo build --release --locked -p telamon-installer-helper
           scripts/check-hardening.sh target/release/telamon-installer-helper
+
+  # The real cryptsetup and systemd-cryptenroll (in an unprivileged container,
+  # on regular files) against what the helper's parsers read, and the
+  # first-start script's tests (docs/SECURITY.md, "Tests").
+  tools:
+    name: real tools, first-start script
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: First-start script
+        run: env -u DISPLAY -u WAYLAND_DISPLAY python3 -m unittest discover -s firstboot/tests -v
+
+      - name: Encryption tools in a container
+        run: tests/container/crypt-flow.sh podman
