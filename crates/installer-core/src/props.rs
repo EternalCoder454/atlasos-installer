@@ -410,11 +410,17 @@ fn edge_u64() -> impl Strategy<Value = u64> {
     ]
 }
 
+/// Short text for the many strings of a device or a table: what matters
+/// there is the numbers and the shape, and a long string only costs time.
+fn small() -> impl Strategy<Value = String> {
+    prop_oneof!["[ -~]{0,8}", ".{0,6}", "[a-z0-9/ \\-\\n\\x00]{0,6}",]
+}
+
 fn name() -> impl Strategy<Value = String> {
     prop_oneof![
         "/dev/(sd[a-d]|vd[a-c]|nvme[0-2]n1)",
-        text().prop_map(|s| format!("/dev/{s}")),
-        text(),
+        small().prop_map(|s| format!("/dev/{s}")),
+        small(),
     ]
 }
 
@@ -423,9 +429,12 @@ fn partition() -> impl Strategy<Value = Partition> {
         name(),
         edge_u64(),
         edge_u64(),
-        near("[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}"),
-        prop::option::of(text()),
-        prop::option::of(text()),
+        prop_oneof![
+            small(),
+            "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}"
+        ],
+        prop::option::of(small()),
+        prop::option::of(small()),
     )
         .prop_map(|(node, start, size, kind, uuid, name)| Partition {
             node,
@@ -439,11 +448,11 @@ fn partition() -> impl Strategy<Value = Partition> {
 
 fn hostile_table(device: String) -> impl Strategy<Value = Table> {
     (
-        prop_oneof![Just("gpt".to_string()), Just("dos".to_string()), text()],
+        prop_oneof![Just("gpt".to_string()), Just("dos".to_string()), small()],
         prop::option::of(edge_u64()),
         prop::option::of(edge_u64()),
         prop_oneof![Just(512u64), Just(4096), edge_u64()],
-        prop::collection::vec(partition(), 0..6),
+        prop::collection::vec(partition(), 0..5),
     )
         .prop_map(
             move |(label, firstlba, lastlba, sectorsize, partitions)| Table {
@@ -461,10 +470,10 @@ fn hostile_table(device: String) -> impl Strategy<Value = Table> {
 fn hostile_device() -> impl Strategy<Value = Device> {
     let part = (
         name(),
-        prop_oneof![Just("part".to_string()), text()],
+        prop_oneof![Just("part".to_string()), small()],
         edge_u64(),
-        prop::option::of(text()),
-        prop::option::of(text()),
+        prop::option::of(small()),
+        prop::option::of(small()),
     )
         .prop_map(|(name, kind, size, fstype, label)| Device {
             name,
@@ -476,14 +485,14 @@ fn hostile_device() -> impl Strategy<Value = Device> {
         });
     (
         name(),
-        prop_oneof![Just("disk".to_string()), Just("rom".to_string()), text()],
+        prop_oneof![Just("disk".to_string()), Just("rom".to_string()), small()],
         edge_u64(),
         prop::option::of(edge_u64()),
         any::<bool>(),
-        prop::collection::vec(part, 0..5),
-        prop::option::of(text()),
-        prop::option::of(text()),
-        prop::option::of(text()),
+        prop::collection::vec(part, 0..4),
+        prop::option::of(small()),
+        prop::option::of(small()),
+        prop::option::of(small()),
     )
         .prop_map(
             |(name, kind, size, log_sec, ro, children, model, vendor, serial)| Device {

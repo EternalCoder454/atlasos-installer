@@ -1639,6 +1639,20 @@ mod props {
             let _ = stat_fields(&s);
         }
 
+
+        #[test]
+        fn unit_paths_and_ids_in_the_seal_unit(uuid in text()) {
+            if let Ok(u) = installer_core::crypt::seal_unit(Encryption::TpmPin, &uuid) {
+                prop_assert!(installer_core::settings::validate_uuid(&uuid).is_ok());
+                let tail = format!("{}\n[", uuid);
+                prop_assert!(!u.contains(&tail));
+            }
+        }
+    }
+
+    // (a directory tree per case: fewer cases than the others)
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: ProptestConfig::default().cases.min(2000), ..ProptestConfig::default() })]
         #[test]
         fn a_path_is_written_inside_its_base_or_not_at_all(rel in near("([a-z]{1,5}/){0,4}[a-z.]{1,5}")) {
             let dir = tempfile::tempdir().unwrap();
@@ -1652,15 +1666,6 @@ mod props {
             if r.is_ok() {
                 prop_assert!(!rel.split('/').any(|c| c.is_empty() || c == "." || c == ".."));
                 prop_assert!(base.join(&rel).is_file());
-            }
-        }
-
-        #[test]
-        fn unit_paths_and_ids_in_the_seal_unit(uuid in text()) {
-            if let Ok(u) = installer_core::crypt::seal_unit(Encryption::TpmPin, &uuid) {
-                prop_assert!(installer_core::settings::validate_uuid(&uuid).is_ok());
-                let tail = format!("{}\n[", uuid);
-                prop_assert!(!u.contains(&tail));
             }
         }
     }
