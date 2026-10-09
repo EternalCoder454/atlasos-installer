@@ -8,6 +8,7 @@ on:
     paths: &paths
       - crates/**
       - helper/**
+      - scripts/**
       # installer-core embeds the apps list
       - firstboot/apps.json
       - Cargo.toml
@@ -59,3 +60,23 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --locked
+
+      # The validators and parsers (disk names, passwords and PINs, locales,
+      # keyboard layouts, the lsblk and sfdisk output, ...) with 20000 random
+      # cases each, not the 256 of a local run. The property tests are the
+      # ones named props.
+      - name: Property tests
+        env:
+          PROPTEST_CASES: "20000"
+        run: cargo test --workspace --locked -- props
+
+      # The root helper as the live image gets it (live/stage-installer.sh
+      # builds it the same way): PIE, full RELRO, no executable stack, no
+      # RPATH, read back from the finished program.
+      - name: Hardening check
+        env:
+          RUSTFLAGS: -C relro-level=full -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,noexecstack
+        run: |
+          scripts/test-check-hardening.sh
+          cargo build --release --locked -p telamon-installer-helper
+          scripts/check-hardening.sh target/release/telamon-installer-helper
